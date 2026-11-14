@@ -1,0 +1,10 @@
+/work/
+/outputs/seetong-data/
+/outputs/seetong-yolox.onnx
+__pycache__/
+*.py[cod]
+*.dpapi
+*.log
+*.tmp
+*.msi
+.env

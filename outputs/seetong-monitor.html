@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Seetong 区域监控</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,"Microsoft YaHei UI",sans-serif;background:#101518;color:#eff5f2;--mint:#69e5ab;--line:#303e41}
+*{box-sizing:border-box}body{margin:0}main{max-width:1260px;margin:auto;padding:36px 26px 60px}header{display:flex;gap:20px;align-items:center;justify-content:space-between;margin-bottom:24px}h1,h2,p{margin:0}h1{font-size:clamp(1.5rem,3vw,2.4rem);letter-spacing:-.05em}h2{font-size:1.05rem}
+.status,small{color:#aac3b9}.status{padding:8px 12px;border:1px solid var(--line);border-radius:20px;font-size:.86rem}.grid{display:grid;grid-template-columns:minmax(0,1fr) 305px;gap:18px}.panel{border:1px solid var(--line);border-radius:14px;background:#192124;padding:17px}.preview{padding:0;overflow:hidden}.toolbar{display:flex;align-items:center;justify-content:space-between;padding:14px 17px;gap:10px}.count{color:var(--mint);font-variant-numeric:tabular-nums}
+canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-action:none;cursor:crosshair}.help{color:#a9bcb7;font-size:.85rem;padding:13px 17px;line-height:1.65}.controls{display:grid;align-content:start;gap:12px}label{display:grid;gap:6px;font-size:.88rem;color:#c5d7d1}input,select,button{font:inherit;border:1px solid var(--line);border-radius:8px;padding:9px 11px}input,select{min-width:0;background:#10181b;color:inherit}button{cursor:pointer;background:#263236;color:inherit}button.primary{background:var(--mint);border-color:var(--mint);color:#0a2318;font-weight:700}button:disabled{opacity:.4;cursor:default}.check{display:flex;align-items:center;gap:8px}.check input{accent-color:var(--mint)}.actions{display:flex;gap:8px;flex-wrap:wrap}.actions button{flex:1}.error{color:#ffada4;font-size:.85rem;line-height:1.5}.snapshots{margin-top:18px}.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:12px}.shot{padding:0;overflow:hidden;text-align:left}.shot img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#091013}.shot span{display:block;padding:8px;font-size:.76rem;color:#c5d7d1}dialog{max-width:min(92vw,1000px);border:1px solid var(--line);background:#192124;border-radius:12px;color:inherit}dialog img{display:block;max-width:100%;margin-top:12px}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+@media(max-width:780px){main{padding:20px 12px}.grid{grid-template-columns:1fr}.controls{grid-row:1}header{align-items:flex-start}}
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Seetong 区域监控</h1><span class="status" id="status" role="status">连接本机服务…</span></header>
+  <div class="grid">
+    <section class="panel preview">
+      <div class="toolbar"><h2 id="videoTitle">实时画面</h2><strong class="count" id="count">区域人数 —</strong></div>
+      <canvas id="screen" width="640" height="360" aria-label="直播画面，拖动选择检测区域"></canvas>
+      <p class="help">画面出现后，拖动鼠标框出检测区域，再点「启动检测」。区域会按通道记住。</p>
+    </section>
+    <section class="panel controls">
+      <h2>摄像头连接</h2>
+      <form id="login" class="controls">
+        <label>云平台账号<input id="username" autocomplete="username" maxlength="200"></label>
+        <label>密码<input id="password" type="password" autocomplete="current-password" maxlength="300"></label>
+        <label class="check"><input id="remember" type="checkbox" checked>在本机记住账号和密码</label>
+        <small id="saved"></small>
+        <label>通道<select id="channel"><option value="1">第 1 路</option><option value="2">第 2 路</option><option value="3">第 3 路</option></select></label>
+        <div class="actions"><button class="primary" id="start">打开预览</button><button type="button" id="stop">停止连接</button></div>
+      </form>
+      <div class="actions"><button id="detect">启动检测</button><button id="forget">清除已记住的账号</button></div>
+      <p class="error" id="error" role="alert"></p>
+    </section>
+  </div>
+  <section class="panel snapshots">
+    <div class="toolbar" style="padding:0"><h2>人数增加截图</h2><small>本机保留最近 100 张</small></div>
+    <div class="gallery" id="gallery"></div>
+  </section>
+</main>
+<dialog id="viewer"><button id="closeShot">关闭</button><img id="largeShot" alt="人数增加截图"></dialog>
+<script>
+const session = '__SESSION_TOKEN__';
+const byId = id => document.getElementById(id);
+const screen = byId('screen'), ctx = screen.getContext('2d');
+let state = {}, bitmap, drag, previewRegion, lastSequence = 0, previousShots;
+let channelInitialized = false;
+async function request(path, data) {
+  const headers = {'X-Seetong-Session':session};
+  const options = {headers, cache:'no-store'};
+  if (data !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    options.method = 'POST';
+    options.body = JSON.stringify(data);
+  }
+  const result = await fetch(path, options);
+  if (!result.ok) {
+    const error = await result.json().catch(() => ({}));
+    throw new Error(error.error || '本机请求失败');
+  }
+  return result;
+}
+function draw() {
+  ctx.fillStyle = '#091013'; ctx.fillRect(0, 0, 640, 360);
+  if (bitmap) ctx.drawImage(bitmap, 0, 0, 640, 360);
+  else {
+    ctx.fillStyle = '#a9bcb7'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('等待摄像头画面', 320, 184);
+  }
+  const region = previewRegion || state.regions?.[state.channel];
+  if (region && bitmap) {
+    const [x,y,r,b] = region;
+    ctx.fillStyle = '#69e5ab24'; ctx.strokeStyle = '#69e5ab'; ctx.lineWidth = 2;
+    ctx.fillRect(x*640,y*360,(r-x)*640,(b-y)*360);
+    ctx.strokeRect(x*640,y*360,(r-x)*640,(b-y)*360);
+  }
+}
+function position(event) {
+  const rect = screen.getBoundingClientRect();
+  const bound = n => Math.max(0, Math.min(1,n));
+  return [bound((event.clientX-rect.left)/rect.width),bound((event.clientY-rect.top)/rect.height)];
+}
+screen.onpointerdown = event => {
+  if (!bitmap) return;
+  drag = position(event); screen.setPointerCapture(event.pointerId);
+};
+screen.onpointermove = event => {
+  if (!drag) return;
+  const [x,y] = position(event);
+  previewRegion = [Math.min(x,drag[0]),Math.min(y,drag[1]),Math.max(x,drag[0]),Math.max(y,drag[1])];
+  draw();
+};
+screen.onpointercancel = () => {drag = previewRegion = null; draw();};
+screen.onpointerup = async () => {
+  if (!drag) return;
+  drag = null;
+  if (previewRegion) {
+    const region = previewRegion;
+    await action(async () => {
+      await request('/api/region',{region});
+      state.regions[state.channel] = region;
+    });
+  }
+  previewRegion = null; draw();
+};
+async function action(fn) {
+  byId('error').textContent = '';
+  try { await fn(); } catch(error) { byId('error').textContent = error.message; }
+}
+byId('login').onsubmit = event => {
+  event.preventDefault();
+  action(async () => {
+    byId('start').disabled = true;
+    try {
+      await request('/api/start',{
+        username:byId('username').value,password:byId('password').value,
+        remember:byId('remember').checked,channel:Number(byId('channel').value)
+      });
+      byId('username').value = '';
+      byId('password').value = '';
+    } finally { byId('start').disabled = !!state.active; }
+  });
+};
+byId('stop').onclick = () => action(() => request('/api/stop',{}));
+byId('forget').onclick = () => action(() => request('/api/forget',{}));
+byId('detect').onclick = () => action(() => request('/api/detect',{enabled:!state.detect}));
+byId('closeShot').onclick = () => byId('viewer').close();
+byId('viewer').onclose = () => {
+  URL.revokeObjectURL(byId('largeShot').src);
+  byId('largeShot').removeAttribute('src');
+};
+const urls = [];
+async function updateGallery(shots) {
+  if (previousShots === shots.join()) return;
+  previousShots = shots.join();
+  const gallery = byId('gallery');
+  urls.splice(0).forEach(url => URL.revokeObjectURL(url));
+  gallery.replaceChildren();
+  if (!shots.length) {
+    const empty = document.createElement('small'); empty.textContent = '暂无截图'; gallery.append(empty);
+  }
+  for (const name of shots) {
+    const button = document.createElement('button'), image = document.createElement('img');
+    const caption = document.createElement('span'), parts = name.replace('.jpg','').split('-');
+    button.className = 'shot'; image.alt = '';
+    caption.textContent = `第 ${parts[3].slice(2)} 路 · ${parts[4]} → ${parts[5]} 人 · ${parts[1].replace(/^(..)(..)(..)$/, '$1:$2:$3')}`;
+    button.append(image, caption); gallery.append(button);
+    request('/api/shot/'+name).then(response => response.blob()).then(blob => {
+      if (!image.isConnected) return;
+      const url = URL.createObjectURL(blob);
+      urls.push(url); image.src = url;
+    }).catch(() => {});
+    button.onclick = () => action(async () => {
+      const image = byId('largeShot');
+      image.src = URL.createObjectURL(await (await request('/api/shot/'+name)).blob());
+      byId('viewer').showModal();
+    });
+  }
+}
+async function poll() {
+  try {
+    state = await (await request('/api/state')).json();
+    byId('status').textContent = state.message;
+    byId('videoTitle').textContent = state.active ? `第 ${state.channel} 路实时画面` : '实时画面';
+    byId('count').textContent = '区域人数 ' + (state.count ?? '—');
+    byId('saved').textContent = state.saved ? '已记住。账号和密码留空即可使用。' : '尚未保存账号';
+    byId('start').disabled = state.active;
+    byId('channel').disabled = state.active;
+    byId('stop').disabled = !state.active;
+    byId('forget').disabled = !state.saved || state.active;
+    byId('detect').disabled = !state.sequence || !state.regions[state.channel];
+    byId('detect').textContent = state.detect ? '暂停检测' : '启动检测';
+    if (!channelInitialized || state.active) {
+      byId('channel').value = String(state.channel); channelInitialized = true;
+    }
+    if (state.sequence !== lastSequence) {
+      const next = state.sequence ? await createImageBitmap(await (await request('/api/frame')).blob()) : null;
+      bitmap?.close(); bitmap = next; lastSequence = state.sequence;
+    }
+    draw();
+    updateGallery(state.shots);
+  } catch(error) {
+    byId('status').textContent = '本机服务暂不可用';
+    if (bitmap) {bitmap.close(); bitmap = null; lastSequence = 0; draw();}
+  } finally { setTimeout(poll, 220); }
+}
+draw(); poll();
+</script>
+</body>
+</html>
