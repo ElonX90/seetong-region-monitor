@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from seetong_sdk import runtime_root
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -448,7 +449,7 @@ def main(argv=None, *, credentials=None, consumer=None):
     parser.add_argument("--play", action="store_true", help="Open a live FFplay preview")
     parser.add_argument("--channel", type=int, choices=range(1, 4), default=1)
     args = parser.parse_args(argv)
-    root = Path(os.environ["ProgramFiles(x86)"]) / "Seetong"
+    root = runtime_root()
     library = root / "Funclib.dll"
     binary = library.read_bytes()
     basic = re.search(rb"c2VldG9uZ19jbG91ZF9tZW1iZXI6[A-Za-z0-9+/=]+", binary)

@@ -1,5 +1,6 @@
 /work/
 /outputs/seetong-data/
+/outputs/seetong-sdk/
 /outputs/seetong-yolox.onnx
 __pycache__/
 *.py[cod]
