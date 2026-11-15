@@ -10,11 +10,17 @@
 .status,small{color:#aac3b9}.status{padding:8px 12px;border:1px solid var(--line);border-radius:20px;font-size:.86rem}.grid{display:grid;grid-template-columns:minmax(0,1fr) 305px;gap:18px}.panel{border:1px solid var(--line);border-radius:14px;background:#192124;padding:17px}.preview{padding:0;overflow:hidden}.toolbar{display:flex;align-items:center;justify-content:space-between;padding:14px 17px;gap:10px}.count{color:var(--mint);font-variant-numeric:tabular-nums}
 canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-action:none;cursor:crosshair}.help{color:#a9bcb7;font-size:.85rem;padding:13px 17px;line-height:1.65}.controls{display:grid;align-content:start;gap:12px}label{display:grid;gap:6px;font-size:.88rem;color:#c5d7d1}input,select,button{font:inherit;border:1px solid var(--line);border-radius:8px;padding:9px 11px}input,select{min-width:0;background:#10181b;color:inherit}button{cursor:pointer;background:#263236;color:inherit}button.primary{background:var(--mint);border-color:var(--mint);color:#0a2318;font-weight:700}button:disabled{opacity:.4;cursor:default}.check{display:flex;align-items:center;gap:8px}.check input{accent-color:var(--mint)}.actions{display:flex;gap:8px;flex-wrap:wrap}.actions button{flex:1}.error{color:#ffada4;font-size:.85rem;line-height:1.5}.snapshots{margin-top:18px}.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:12px}.shot{padding:0;overflow:hidden;text-align:left}.shot img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#091013}.shot span{display:block;padding:8px;font-size:.76rem;color:#c5d7d1}dialog{max-width:min(92vw,1000px);border:1px solid var(--line);background:#192124;border-radius:12px;color:inherit}dialog img{display:block;max-width:100%;margin-top:12px}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
 @media(max-width:780px){main{padding:20px 12px}.grid{grid-template-columns:1fr}.controls{grid-row:1}header{align-items:flex-start}}
+.event-list{display:grid;gap:8px;margin:12px 0 0;padding:0;list-style:none}.event-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.event-row span{flex:1;min-width:210px}.event-row a{color:var(--mint);padding:8px}dialog video{display:block;width:min(82vw,880px);max-height:72vh;margin-top:12px;background:#091013}
+.alerts summary{cursor:pointer;font-weight:600}.alerts form{max-width:480px;margin-top:12px}.alerts a{color:var(--mint)}
+.local-file-notice{max-width:620px}.local-file-notice p{margin-top:12px;line-height:1.6}.local-file-notice a{color:var(--mint)}
+.header-actions,.history-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.history-filters{padding-bottom:12px}.history-filters label{flex:1;min-width:120px}.history-dialog{width:min(92vw,740px);max-height:85vh}.history-dialog .toolbar{padding:0 0 14px}.history-list{margin-top:0}.recording-text{display:grid;gap:4px}.device-list{max-width:600px}.device-list strong{overflow-wrap:anywhere}
+.event-cards{display:grid;gap:14px;margin:14px 0 0;padding:0;list-style:none}.event-card{display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:16px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#152023}.event-card .shot{width:100%;align-self:start}.event-thumb-empty{display:grid;place-items:center;aspect-ratio:16/9;background:#10181b;border-radius:8px}.event-body{display:grid;align-content:start;gap:8px}.event-body .actions{align-items:center}.event-body .actions button{flex:none}.event-body a{color:var(--mint);padding:8px}.event-timeline{display:grid;gap:5px;padding:0;list-style:none}.event-change{padding:4px 0;border:0;background:transparent;color:#c5d7d1;text-align:left}.event-change:hover{text-decoration:underline}.event-change time{color:var(--mint);margin-right:8px;font-variant-numeric:tabular-nums}.storage-form{max-width:640px;display:grid;gap:12px;margin-top:14px}.storage-limits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.storage-form button{justify-self:start}.history-list .event-card{grid-template-columns:minmax(120px,180px) minmax(0,1fr)}
+@media(max-width:520px){.event-card,.history-list .event-card,.storage-limits{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <main>
-  <header><h1>Seetong 区域监控</h1><span class="status" id="status" role="status">连接本机服务…</span></header>
+  <header><h1>Seetong 区域监控</h1><div class="header-actions"><button id="openHistory" type="button">历史录像</button><span class="status" id="status" role="status">连接本机服务…</span></div></header>
   <div class="grid">
     <section class="panel preview">
       <div class="toolbar"><h2 id="videoTitle">实时画面</h2><strong class="count" id="count">区域人数 —</strong></div>
@@ -27,6 +33,8 @@ canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-actio
         <label>云平台账号<input id="username" autocomplete="username" maxlength="200"></label>
         <label>密码<input id="password" type="password" autocomplete="current-password" maxlength="300"></label>
         <label class="check"><input id="remember" type="checkbox" checked>在本机记住账号和密码</label>
+        <label class="check"><input id="record" type="checkbox" checked>同时保存连续录像</label>
+        <small id="recordStatus"></small>
         <small id="saved"></small>
         <label>通道<select id="channel"><option value="1">第 1 路</option><option value="2">第 2 路</option><option value="3">第 3 路</option></select></label>
         <div class="actions"><button class="primary" id="start">打开预览</button><button type="button" id="stop">停止连接</button></div>
@@ -35,18 +43,69 @@ canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-actio
       <p class="error" id="error" role="alert"></p>
     </section>
   </div>
+  <details class="panel snapshots alerts" id="mobileAlerts">
+    <summary>手机提醒</summary>
+    <ul class="event-list device-list" id="alertDevices" aria-label="已绑定设备"><li><small>正在读取已绑定设备…</small></li></ul>
+    <form class="controls" id="alertForm">
+      <small>打开手机 WxPusher 的「我的 → SPT」，把 SPT 粘贴在这里。<a href="https://wxpusher.zjiecode.com/download/" target="_blank" rel="noreferrer">下载 WxPusher</a></small>
+      <label>设备名称<input id="alertName" maxlength="40" placeholder="例如：我的手机"></label>
+      <label>WxPusher SPT<input id="alertToken" type="password" autocomplete="off" maxlength="124" required></label>
+      <div class="actions">
+        <button id="saveAlert" type="submit">绑定设备</button>
+      </div>
+      <small id="alertStatus" role="status"></small>
+      <small id="alertFeedback" role="status"></small>
+    </form>
+  </details>
+  <details class="panel snapshots alerts" id="storageSettings">
+    <summary>录像存储设置</summary>
+    <form class="storage-form" id="storageForm">
+      <div class="storage-limits">
+        <label>事件视频及截图上限（GB）<input id="eventLimit" type="number" min="0.01" max="10000" step="0.01" required><small id="eventUsage"></small></label>
+        <label>普通录像上限（GB）<input id="continuousLimit" type="number" min="0.01" max="10000" step="0.01" required><small id="continuousUsage"></small></label>
+      </div>
+      <small>达到上限时清理该类最旧的已保存文件。调低上限也会清理旧文件。</small>
+      <button id="saveStorage" type="submit" disabled>保存上限</button>
+      <small id="storageFeedback" role="status"></small>
+    </form>
+  </details>
   <section class="panel snapshots">
-    <div class="toolbar" style="padding:0"><h2>人数增加截图</h2><small>本机保留最近 100 张</small></div>
-    <div class="gallery" id="gallery"></div>
+    <div class="toolbar" style="padding:0"><h2>区域事件</h2><small id="eventStatus"></small></div>
+    <ul class="event-cards" id="eventList"><li><small>正在读取事件…</small></li></ul>
   </section>
 </main>
-<dialog id="viewer"><button id="closeShot">关闭</button><img id="largeShot" alt="人数增加截图"></dialog>
+<dialog id="viewer"><button id="closeShot">关闭</button><img id="largeShot" alt="区域事件截图"></dialog>
+<dialog id="historyViewer" class="history-dialog" aria-labelledby="historyTitle">
+  <div class="toolbar"><h2 id="historyTitle">历史录像</h2><button id="closeHistory" type="button">关闭</button></div>
+  <div class="history-filters">
+    <label>录像类型<select id="historyType"><option value="">全部类型</option><option value="continuous">连续录像</option><option value="event">事件录像</option></select></label>
+    <label>日期<input id="historyDate" type="date"></label>
+    <button id="refreshHistory" type="button">刷新列表</button>
+  </div>
+  <ul class="event-list history-list" id="historyList" aria-live="polite"></ul>
+</dialog>
+<dialog id="eventViewer" aria-labelledby="clipTitle"><div class="toolbar"><h2 id="clipTitle">录像回看</h2><button id="closeEvent">关闭</button></div><video id="eventPlayer" controls playsinline></video><p class="error" id="eventError" role="alert"></p></dialog>
+<template id="localFileNotice">
+  <section class="panel local-file-notice">
+    <h1>从监控服务打开页面</h1>
+    <p><a href="http://127.0.0.1:8765/">打开 Windows 监控页</a></p>
+    <p>如果网页无法连接，请先双击同目录的「启动监控.cmd」。</p>
+  </section>
+</template>
 <script>
+if (location.protocol === 'file:') {
+  document.querySelector('main').replaceChildren(document.getElementById('localFileNotice').content.cloneNode(true));
+} else {
 const session = '__SESSION_TOKEN__';
 const byId = id => document.getElementById(id);
 const screen = byId('screen'), ctx = screen.getContext('2d');
-let state = {}, bitmap, drag, previewRegion, lastSequence = 0, previousShots;
+let state = {}, bitmap, drag, previewRegion, lastSequence = 0;
 let channelInitialized = false;
+let previousEvents;
+let previousDevices;
+let alertBusy = false;
+let historyEntries = [];
+let storageLoaded = false, storageBusy = false;
 async function request(path, data) {
   const headers = {'X-Seetong-Session':session};
   const options = {headers, cache:'no-store'};
@@ -116,7 +175,8 @@ byId('login').onsubmit = event => {
     try {
       await request('/api/start',{
         username:byId('username').value,password:byId('password').value,
-        remember:byId('remember').checked,channel:Number(byId('channel').value)
+        remember:byId('remember').checked,channel:Number(byId('channel').value),
+        record:byId('record').checked
       });
       byId('username').value = '';
       byId('password').value = '';
@@ -126,48 +186,233 @@ byId('login').onsubmit = event => {
 byId('stop').onclick = () => action(() => request('/api/stop',{}));
 byId('forget').onclick = () => action(() => request('/api/forget',{}));
 byId('detect').onclick = () => action(() => request('/api/detect',{enabled:!state.detect}));
+function showAlertState() {
+  const alerts = state.alerts;
+  const enabled = alerts?.enabled;
+  byId('saveAlert').disabled = alertBusy || !alerts;
+  const devices = alerts?.devices || [];
+  const signature = JSON.stringify([devices, state.event_share]);
+  const list = byId('alertDevices');
+  if (previousDevices !== signature) {
+    previousDevices = signature;
+    if (!devices.length) showListMessage(list, '暂无已绑定设备');
+    else list.replaceChildren(...devices.map(device => {
+      const row = document.createElement('li');
+      row.className = 'event-row';
+      const label = document.createElement('span');
+      label.className = 'recording-text';
+      const name = document.createElement('strong'), binding = document.createElement('small');
+      name.textContent = device.name; binding.textContent = 'WxPusher · 已绑定';
+      label.append(name, binding);
+      const test = document.createElement('button'), remove = document.createElement('button');
+      test.textContent = state.event_share ? '测试录像提醒' : '发测试提醒';
+      remove.textContent = '解绑';
+      test.onclick = () => updateAlerts('test', {id:device.id, event:state.event_share === true}, '测试提醒已提交，请查看该设备。');
+      remove.onclick = () => updateAlerts('unbind', {id:device.id}, '已解绑设备。');
+      row.append(label, test, remove);
+      return row;
+    }));
+  }
+  list.querySelectorAll('button').forEach(button => {button.disabled = alertBusy;});
+  const label = alerts ? (enabled ? '提醒已启用' : '提醒未启用') : '等待新版监控服务连接';
+  byId('alertStatus').textContent = alerts?.last_result ? `${label} · ${alerts.last_result}` : label;
+}
+async function updateAlerts(route, data, success) {
+  alertBusy = true; showAlertState();
+  const feedback = byId('alertFeedback');
+  feedback.textContent = '';
+  try {
+    const result = await (await request('/api/alerts/' + route, data)).json();
+    if (result.alerts) state.alerts = result.alerts;
+    if (route === 'configure') byId('alertForm').reset();
+    feedback.textContent = success;
+  } catch (error) {
+    feedback.textContent = error.message;
+  } finally {
+    alertBusy = false; showAlertState();
+  }
+}
+byId('alertForm').onsubmit = event => {
+  event.preventDefault();
+  updateAlerts('configure', {name:byId('alertName').value, spt:byId('alertToken').value}, '已绑定。可从列表发送测试提醒。');
+};
+function showStorage() {
+  if (!state.storage) return;
+  const entries = [['event', 'eventLimit', 'eventUsage'], ['continuous', 'continuousLimit', 'continuousUsage']];
+  for (const [kind, field, usage] of entries) {
+    const {limit, used} = state.storage[kind];
+    if (!storageLoaded) byId(field).value = limit / 1e9;
+    const current = used < 1e9 ? `${(used / 1e6).toFixed(1)} MB` : `${(used / 1e9).toFixed(2)} GB`;
+    byId(usage).textContent = `已用 ${current} / ${limit / 1e9} GB`;
+  }
+  storageLoaded = true;
+  byId('saveStorage').disabled = storageBusy;
+}
+byId('storageForm').onsubmit = async event => {
+  event.preventDefault();
+  storageBusy = true; showStorage();
+  const feedback = byId('storageFeedback');
+  feedback.textContent = '';
+  try {
+    await request('/api/storage', {event:byId('eventLimit').valueAsNumber, continuous:byId('continuousLimit').valueAsNumber});
+    feedback.textContent = '存储上限已保存。';
+  } catch(error) {
+    feedback.textContent = error.message;
+  } finally { storageBusy = false; showStorage(); }
+};
 byId('closeShot').onclick = () => byId('viewer').close();
 byId('viewer').onclose = () => {
-  URL.revokeObjectURL(byId('largeShot').src);
   byId('largeShot').removeAttribute('src');
 };
-const urls = [];
-async function updateGallery(shots) {
-  if (previousShots === shots.join()) return;
-  previousShots = shots.join();
-  const gallery = byId('gallery');
-  urls.splice(0).forEach(url => URL.revokeObjectURL(url));
-  gallery.replaceChildren();
-  if (!shots.length) {
-    const empty = document.createElement('small'); empty.textContent = '暂无截图'; gallery.append(empty);
+const eventPlayer = byId('eventPlayer');
+byId('closeEvent').onclick = () => byId('eventViewer').close();
+byId('eventViewer').onclose = () => {
+  eventPlayer.pause(); eventPlayer.removeAttribute('src'); eventPlayer.load();
+};
+eventPlayer.onerror = () => {
+  if (eventPlayer.getAttribute('src')) byId('eventError').textContent = '播放失败，可下载原始录像后打开。';
+};
+function showListMessage(list, message) {
+  const row = document.createElement('li'), label = document.createElement('small');
+  label.textContent = message;
+  row.append(label); list.replaceChildren(row);
+}
+function playRecording(recording, endpoint) {
+  byId('eventError').textContent = '';
+  const type = recording.type === 'event' ? '事件录像' : '普通录像';
+  byId('clipTitle').textContent = `第 ${recording.channel} 路 · ${type}`;
+  eventPlayer.src = `/api/${endpoint}/play/${recording.name}?session=${session}`;
+  byId('eventViewer').showModal();
+  eventPlayer.play().catch(() => {});
+}
+function recordingRow(recording, endpoint) {
+  const {name, type, channel, time, size} = recording;
+  const title = `第 ${channel} 路 · ${type === 'event' ? '事件录像' : '连续录像'}`;
+  const row = document.createElement('li'), label = document.createElement('span');
+  const heading = document.createElement('strong'), detail = document.createElement('small');
+  const play = document.createElement('button'), download = document.createElement('a');
+  row.className = 'event-row'; label.className = 'recording-text';
+  heading.textContent = title;
+  const date = new Date(time).toLocaleString('zh-CN', {hour12:false});
+  detail.textContent = `${type === 'event' ? '触发于' : '保存于'} ${date}` + (size ? ` · ${(size / 1e6).toFixed(2)} MB` : '');
+  label.append(heading, detail);
+  play.textContent = '回看'; download.textContent = '下载';
+  download.href = `/api/${endpoint}/download/${name}?session=${session}`;
+  play.onclick = () => playRecording(recording, endpoint);
+  row.append(label, play, download);
+  return row;
+}
+function shotURL(shot) { return `/api/shot/${shot.name}?session=${session}`; }
+function openShot(shot) {
+  byId('largeShot').src = shotURL(shot);
+  byId('viewer').showModal();
+}
+function eventCard(entry) {
+  const card = document.createElement('li'), body = document.createElement('div');
+  card.className = 'event-card'; body.className = 'event-body';
+  const shots = entry.shots || [];
+  const first = shots[0];
+  if (first) {
+    const preview = document.createElement('button'), image = document.createElement('img');
+    preview.className = 'shot'; preview.type = 'button'; preview.onclick = () => openShot(first);
+    image.loading = 'lazy'; image.alt = '查看事件截图'; image.src = shotURL(first);
+    preview.append(image); card.append(preview);
+  } else {
+    const empty = document.createElement('small');
+    empty.className = 'event-thumb-empty'; empty.textContent = '暂无截图'; card.append(empty);
   }
-  for (const name of shots) {
-    const button = document.createElement('button'), image = document.createElement('img');
-    const caption = document.createElement('span'), parts = name.replace('.jpg','').split('-');
-    button.className = 'shot'; image.alt = '';
-    caption.textContent = `第 ${parts[3].slice(2)} 路 · ${parts[4]} → ${parts[5]} 人 · ${parts[1].replace(/^(..)(..)(..)$/, '$1:$2:$3')}`;
-    button.append(image, caption); gallery.append(button);
-    request('/api/shot/'+name).then(response => response.blob()).then(blob => {
-      if (!image.isConnected) return;
-      const url = URL.createObjectURL(blob);
-      urls.push(url); image.src = url;
-    }).catch(() => {});
-    button.onclick = () => action(async () => {
-      const image = byId('largeShot');
-      image.src = URL.createObjectURL(await (await request('/api/shot/'+name)).blob());
-      byId('viewer').showModal();
-    });
+  const name = document.createElement('strong'), time = document.createElement('small');
+  name.textContent = `第 ${entry.channel} 路 · 区域内检测到人员`;
+  time.textContent = new Date(entry.time).toLocaleString('zh-CN', {hour12:false});
+  body.append(name, time);
+  if (shots.length) {
+    const timeline = document.createElement('ul'); timeline.className = 'event-timeline';
+    for (const shot of shots) {
+      const item = document.createElement('li'), button = document.createElement('button');
+      const stamp = document.createElement('time'), at = new Date(shot.time);
+      button.type = 'button'; button.className = 'event-change';
+      stamp.dateTime = at.toISOString(); stamp.textContent = at.toLocaleTimeString('zh-CN', {hour12:false});
+      button.append(stamp, `区域人数 ${shot.previous} → ${shot.count} 人`);
+      button.onclick = () => openShot(shot);
+      item.append(button); timeline.append(item);
+    }
+    body.append(timeline);
   }
+  if (entry.name) {
+    const actions = document.createElement('div'); actions.className = 'actions';
+    const play = document.createElement('button'), download = document.createElement('a');
+    play.type = 'button'; play.textContent = '回看';
+    play.onclick = () => playRecording(entry, 'recordings');
+    download.textContent = '下载'; download.href = `/api/recordings/download/${entry.name}?session=${session}`;
+    actions.append(play, download); body.append(actions);
+  }
+  card.append(body);
+  return card;
+}
+function showHistory() {
+  const type = byId('historyType').value, day = byId('historyDate').value;
+  const list = byId('historyList');
+  const entries = historyEntries.filter(entry => {
+    if (type && entry.type !== type) return false;
+    if (!day) return true;
+    const date = new Date(entry.time);
+    const localDay = [date.getFullYear(), date.getMonth() + 1, date.getDate()].map(value => String(value).padStart(2, '0')).join('-');
+    return localDay === day;
+  });
+  if (entries.length) list.replaceChildren(...entries.map(entry => entry.type === 'event' ? eventCard(entry) : recordingRow(entry, 'recordings')));
+  else showListMessage(list, '暂无符合条件的录像');
+}
+async function loadHistory() {
+  const refresh = byId('refreshHistory');
+  refresh.disabled = true;
+  try {
+    historyEntries = await (await request('/api/recordings')).json();
+    showHistory();
+  } catch (error) {
+    showListMessage(byId('historyList'), '无法读取录像列表，请刷新重试');
+  } finally { refresh.disabled = false; }
+}
+byId('openHistory').onclick = () => {
+  showListMessage(byId('historyList'), '正在读取录像…');
+  byId('historyViewer').showModal();
+  loadHistory();
+};
+byId('closeHistory').onclick = () => byId('historyViewer').close();
+byId('refreshHistory').onclick = loadHistory;
+byId('historyType').onchange = showHistory;
+byId('historyDate').onchange = showHistory;
+async function updateEvents() {
+  try {
+    const events = await (await request('/api/event-cards')).json();
+    const signature = JSON.stringify(events);
+    if (previousEvents === signature) return;
+    previousEvents = signature;
+    const list = byId('eventList');
+    if (!events.length) {
+      showListMessage(list, '暂无区域事件');
+      return;
+    }
+    list.replaceChildren(...events.map(eventCard));
+  } catch (_) {
+    // A temporary connection failure will be retried with the next refresh.
+  } finally { setTimeout(updateEvents, 2500); }
 }
 async function poll() {
   try {
     state = await (await request('/api/state')).json();
+    showAlertState();
+    showStorage();
     byId('status').textContent = state.message;
     byId('videoTitle').textContent = state.active ? `第 ${state.channel} 路实时画面` : '实时画面';
     byId('count').textContent = '区域人数 ' + (state.count ?? '—');
     byId('saved').textContent = state.saved ? '已记住。账号和密码留空即可使用。' : '尚未保存账号';
     byId('start').disabled = state.active;
     byId('channel').disabled = state.active;
+    byId('record').disabled = state.active;
+    const ordinary = state.storage?.continuous;
+    byId('recordStatus').textContent = state.recording && ordinary
+      ? `普通录像 · 已用 ${(ordinary.used / 1e6).toFixed(1)} MB / ${ordinary.limit / 1e9} GB` : '';
+    byId('eventStatus').textContent = state.event_recording ? '正在保存当前事件' : '';
     byId('stop').disabled = !state.active;
     byId('forget').disabled = !state.saved || state.active;
     byId('detect').disabled = !state.sequence || !state.regions[state.channel];
@@ -180,13 +425,13 @@ async function poll() {
       bitmap?.close(); bitmap = next; lastSequence = state.sequence;
     }
     draw();
-    updateGallery(state.shots);
   } catch(error) {
     byId('status').textContent = '本机服务暂不可用';
     if (bitmap) {bitmap.close(); bitmap = null; lastSequence = 0; draw();}
   } finally { setTimeout(poll, 220); }
 }
-draw(); poll();
+draw(); poll(); updateEvents();
+}
 </script>
 </body>
 </html>

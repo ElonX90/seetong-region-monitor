@@ -5,6 +5,7 @@
 __pycache__/
 *.py[cod]
 *.dpapi
+event-share.key
 *.log
 *.tmp
 *.msi
