@@ -3,6 +3,7 @@
 /outputs/seetong-data/
 /outputs/seetong-sdk/
 /outputs/seetong-yolox.onnx
+/outputs/seetong-yolox-nano.onnx
 __pycache__/
 *.py[cod]
 *.dpapi

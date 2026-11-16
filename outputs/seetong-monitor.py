@@ -43,6 +43,7 @@ ALERT_VAULT = DATA / ("wxpusher.dpapi" if os.name == "nt" else "wxpusher.json")
 SETTINGS = DATA / "regions.json"
 STORAGE_SETTINGS = DATA / "storage.json"
 MODEL = ROOT / "seetong-yolox.onnx"
+MODELS = {"nano": ROOT / "seetong-yolox-nano.onnx", "original": MODEL}
 WIDTH, HEIGHT = 640, 360
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -101,17 +102,26 @@ def write_secret(path, value):
 
 
 class PersonDetector:
-    def __init__(self):
+    def __init__(self, model_key="original"):
         import onnxruntime as ort
 
         options = ort.SessionOptions()
-        options.intra_op_num_threads = min(4, os.cpu_count() or 1)
-        self.model = ort.InferenceSession(str(MODEL), options, providers=["CPUExecutionProvider"])
-        self.input = self.model.get_inputs()[0].name
+        options.intra_op_num_threads = 1
+        # Frames arrive intermittently. Park inference threads between runs.
+        options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+        self.model = ort.InferenceSession(str(MODELS[model_key]), options, providers=["CPUExecutionProvider"])
+        model_input = self.model.get_inputs()[0]
+        self.input = model_input.name
+        self.nano = model_key == "nano"
+        self.side = 416 if self.nano else 640
+        if model_input.shape != [1, 3, self.side, self.side]:
+            raise ValueError("人体检测模型的输入尺寸不匹配")
+        self.ratio = min(self.side / WIDTH, self.side / HEIGHT)
         grids = []
         scales = []
         for stride in (8, 16, 32):
-            side = 640 // stride
+            side = self.side // stride
             x, y = np.meshgrid(np.arange(side), np.arange(side))
             grids.append(np.stack((x, y), axis=-1).reshape(-1, 2))
             scales.extend([stride] * side ** 2)
@@ -119,14 +129,19 @@ class PersonDetector:
         self.strides = np.asarray(scales)[:, None]
 
     def boxes(self, image):
-        tensor = np.full((640, 640, 3), 114, dtype=np.float32)
-        tensor[:HEIGHT] = np.asarray(image)
+        tensor = np.full((self.side, self.side, 3), 114, dtype=np.float32)
+        if self.nano:
+            scaled = np.asarray(image.resize((int(WIDTH * self.ratio), int(HEIGHT * self.ratio)),
+                                             Image.Resampling.BILINEAR))
+            tensor[:scaled.shape[0], :scaled.shape[1]] = scaled[:, :, ::-1]
+        else:
+            tensor[:HEIGHT] = np.asarray(image)
         result = self.model.run(None, {self.input: tensor.transpose(2, 0, 1)[None]})[0][0]
         scores = result[:, 4] * result[:, 5]
         mask = (scores >= 0.40) & (np.argmax(result[:, 5:], axis=1) == 0)
         centers = (result[mask, :2] + self.grid[mask]) * self.strides[mask]
         sizes = np.exp(np.clip(result[mask, 2:4], -10, 10)) * self.strides[mask]
-        boxes = np.column_stack((centers - sizes / 2, centers + sizes / 2))
+        boxes = np.column_stack((centers - sizes / 2, centers + sizes / 2)) / self.ratio
         boxes[:, (0, 2)] = np.clip(boxes[:, (0, 2)], 0, WIDTH - 1)
         boxes[:, (1, 3)] = np.clip(boxes[:, (1, 3)], 0, HEIGHT - 1)
         keep = (boxes[:, 2] > boxes[:, 0]) & (boxes[:, 3] > boxes[:, 1])
@@ -158,6 +173,59 @@ class PersonDetector:
         return picked
 
 
+def region_vertices(region):
+    if len(region) == 4 and type(region[0]) in (int, float):
+        x0, y0, x1, y1 = region
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    return region
+
+
+def cross(a, b, p):
+    return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+
+
+def on_edge(a, b, p):
+    return (abs(cross(a, b, p)) <= 1e-10
+            and all(min(s, t) - 1e-10 <= q <= max(s, t) + 1e-10 for s, t, q in zip(a, b, p)))
+
+
+def valid_region(region):
+    def coordinate(value):
+        return type(value) in (int, float) and 0 <= value <= 1
+
+    if not isinstance(region, list):
+        return False
+    if len(region) == 4 and all(map(coordinate, region)):
+        return region[2] - region[0] >= .02 and region[3] - region[1] >= .02
+    if not 3 <= len(region) <= 32 or not all(
+            isinstance(point, list) and len(point) == 2 and all(map(coordinate, point)) for point in region):
+        return False
+    if len({tuple(point) for point in region}) != len(region):
+        return False
+    edges = list(zip(region, region[1:] + region[:1]))
+    for i, (a, b) in enumerate(edges):
+        for j in range(i + 2, len(edges)):
+            if i == 0 and j == len(edges) - 1:
+                continue
+            c, d = edges[j]
+            if (on_edge(a, b, c) or on_edge(a, b, d) or on_edge(c, d, a) or on_edge(c, d, b)
+                    or (cross(a, b, c) * cross(a, b, d) < 0 and cross(c, d, a) * cross(c, d, b) < 0)):
+                return False
+    return abs(sum(a[0]*b[1] - a[1]*b[0] for a, b in edges)) >= .0008
+
+
+def in_region(vertices, x, y):
+    inside = False
+    a = vertices[-1]
+    for b in vertices:
+        if on_edge(a, b, (x, y)):
+            return True
+        if (a[1] > y) != (b[1] > y) and x < a[0] + (y-a[1]) * (b[0]-a[0]) / (b[1]-a[1]):
+            inside = not inside
+        a = b
+    return inside
+
+
 class StableCount:
     RISE_SECONDS = 1.0
     FALL_SECONDS = 2.0
@@ -170,9 +238,10 @@ class StableCount:
         self.since = 0
         self.last_sample = None
 
-    def observe(self, number, now):
-        if (number != self.candidate or self.last_sample is None
-                or now - self.last_sample > self.MAX_SAMPLE_GAP):
+    def observe(self, number, now, *, continuous=None):
+        if self.last_sample is not None and continuous is None:
+            continuous = now - self.last_sample <= self.MAX_SAMPLE_GAP
+        if number != self.candidate or self.last_sample is None or not continuous:
             self.candidate, self.since = number, now
         self.last_sample = now
         delay = (self.CLEAR_SECONDS if number == 0 else
@@ -195,9 +264,17 @@ class Monitor:
         self.sequence = 0
         self.count = None
         self.detect = False
+        self.active_model_key = None
         self.recording = False
         self.event_recording = False
         self.revision = 0
+        self.model_setting = DATA / "detector-model.txt"
+        try:
+            preferred = self.model_setting.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError):
+            preferred = ""
+        self.model_key = preferred if preferred in MODELS and MODELS[preferred].is_file() else (
+            "nano" if MODELS["nano"].is_file() else "original")
         self.regions = json.loads(SETTINGS.read_text(encoding="utf-8")) if SETTINGS.exists() else {}
         limits = json.loads(STORAGE_SETTINGS.read_text(encoding="utf-8")) if STORAGE_SETTINGS.exists() else DEFAULT_LIMITS
         self.storage = RecordingStorage(RECORDINGS, SHOTS, limits)
@@ -227,8 +304,9 @@ class Monitor:
             with recording if recording else nullcontext():
                 self.decode(packets, sdk_done, recording)
         finally:
-            if recording:
-                with self.lock:
+            with self.lock:
+                self.active_model_key = None
+                if recording:
                     self.event_recording = False
         if recording and recording.error:
             raise RuntimeError(recording.error)
@@ -253,6 +331,14 @@ class Monitor:
         player = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   env=env, creationflags=CREATE_NO_WINDOW)
         latest = queue.Queue(maxsize=1)
+        preview_boxes = ()
+        preview_revision = -1
+
+        def draw_boxes(image, boxes):
+            if boxes:
+                overlay = ImageDraw.Draw(image)
+                for box in boxes:
+                    overlay.rectangle(tuple(map(int, box)), outline="#69e5ab", width=2)
 
         def feed():
             try:
@@ -268,15 +354,29 @@ class Monitor:
                 pass
 
         def read():
+            previous_frame = None
+            stream_epoch = 0
             while True:
                 raw = player.stdout.read(size)
                 if len(raw) != size:
                     return
+                captured = time.monotonic()
+                if previous_frame is not None and captured - previous_frame > StableCount.MAX_SAMPLE_GAP:
+                    stream_epoch += 1
+                previous_frame = captured
                 try:
                     latest.get_nowait()
                 except queue.Empty:
                     pass
-                latest.put_nowait(raw)
+                latest.put_nowait((captured, stream_epoch, raw))
+                with self.lock:
+                    boxes = preview_boxes if self.detect and self.revision == preview_revision else ()
+                image = Image.frombytes("RGB", (WIDTH, HEIGHT), raw)
+                draw_boxes(image, boxes)
+                jpeg = self.jpeg(image)
+                with self.lock:
+                    self.frame = jpeg
+                    self.sequence += 1
 
         threads = [threading.Thread(target=fn, daemon=True) for fn in (feed, read)]
         for thread in threads:
@@ -284,6 +384,10 @@ class Monitor:
         stable = StableCount()
         revision = -1
         detector = None
+        loaded_model = None
+        detection_config = None
+        next_detection = 0.0
+        detection_epoch = None
         last_frame = time.monotonic()
         try:
             while not self.stop.is_set() and not sdk_done.is_set():
@@ -291,42 +395,58 @@ class Monitor:
                     if recording.error:
                         raise RuntimeError(recording.error)
                 try:
-                    raw = latest.get(timeout=0.2)
+                    captured, stream_epoch, raw = latest.get(timeout=0.2)
                 except queue.Empty:
                     if player.poll() is not None or time.monotonic() - last_frame > 30:
                         raise RuntimeError("视频解码中断或等待画面超时")
                     continue
-                now = last_frame = time.monotonic()
-                image = Image.frombytes("RGB", (WIDTH, HEIGHT), raw)
+                last_frame = time.monotonic()
                 with self.lock:
                     detect, current_revision = self.detect, self.revision
                     region = self.regions.get(str(self.channel))
+                    model_key = self.model_key
                 if current_revision != revision:
-                    stable, revision = StableCount(), current_revision
+                    config = (detect, region)
+                    if config != detection_config:
+                        stable = StableCount()
+                        detection_config = config
+                    else:
+                        stable.last_sample = None
+                    revision = current_revision
+                    next_detection = 0.0
+                    detection_epoch = None
                 change = None
-                if detect and region:
-                    detector = detector or PersonDetector()
-                    x0, y0, x1, y1 = region
+                shot = None
+                visible = None
+                if detect and region and captured >= next_detection:
+                    next_detection = captured + 0.45
+                    if loaded_model != model_key:
+                        detector = PersonDetector(model_key)
+                        loaded_model = model_key
+                    image = Image.frombytes("RGB", (WIDTH, HEIGHT), raw)
+                    vertices = region_vertices(region)
                     visible = [box for box in detector.boxes(image)
-                               if x0 <= (box[0] + box[2]) / (2 * WIDTH) <= x1
-                               and y0 <= box[3] / HEIGHT <= y1]
-                    change = stable.observe(len(visible), now)
-                    overlay = ImageDraw.Draw(image)
-                    for box in visible:
-                        overlay.rectangle(tuple(map(int, box)), outline="#69e5ab", width=2)
-                jpeg = self.jpeg(image)
+                               if in_region(vertices, (box[0] + box[2]) / (2 * WIDTH), box[3] / HEIGHT)]
+                    change = stable.observe(len(visible), captured, continuous=detection_epoch == stream_epoch)
+                    detection_epoch = stream_epoch
+                    if change:
+                        draw_boxes(image, visible)
+                        shot = self.jpeg(image)
                 with self.lock:
-                    self.frame = jpeg
-                    self.sequence += 1
                     if current_revision != self.revision:
                         continue
+                    if visible is not None:
+                        preview_boxes, preview_revision = visible, revision
+                        self.active_model_key = model_key
+                    elif not detect or not region:
+                        self.active_model_key = None
                     self.count = stable.count if detect else None
                     self.message = "检测中" if detect else "预览中"
                     if recording and recording.events:
-                        recording.events.observe(bool(detect and region and stable.count), now, change, jpeg)
+                        recording.events.observe(bool(detect and region and stable.count), time.monotonic(), change, shot)
                         self.event_recording = recording.events.file is not None
                     elif change:
-                        self.storage.snapshot(self.channel, change, jpeg)
+                        self.storage.snapshot(self.channel, change, shot)
         finally:
             sdk_done.set()
             try:
@@ -467,6 +587,9 @@ class Handler(BaseHTTPRequestHandler):
                     alerts=monitor.alerts.status(),
                     event_share=monitor.event_share is not None,
                     regions=monitor.regions,
+                    detector_model=monitor.model_key,
+                    active_detector_model=monitor.active_model_key,
+                    detector_models={key: path.is_file() for key, path in MODELS.items()},
                 ))
             if route == "/api/frame" and monitor.frame:
                 return self.reply(monitor.frame, mime="image/jpeg")
@@ -640,19 +763,29 @@ class Handler(BaseHTTPRequestHandler):
                     if not monitor.frame:
                         raise ValueError("请先打开实时画面")
                     points = data.get("region")
-                    if (not isinstance(points, list) or len(points) != 4
-                            or any(type(point) not in (int, float) or not 0 <= point <= 1 for point in points)
-                            or points[2] - points[0] < .02 or points[3] - points[1] < .02):
-                        raise ValueError("请拖出一个有效区域")
+                    if data.get("channel", monitor.channel) != monitor.channel:
+                        raise ValueError("通道已切换，请重新绘制区域")
+                    if not valid_region(points):
+                        raise ValueError("区域太小或边线相交，请调整边界")
                     updated = monitor.regions | {str(monitor.channel): points}
                     atomic_write(SETTINGS, json.dumps(updated).encode("utf-8"))
                     monitor.regions = updated
                     monitor.revision += 1
+                elif route == "/api/detector-model":
+                    selected = data.get("model")
+                    if not isinstance(selected, str) or selected not in MODELS:
+                        raise ValueError("未知的人体检测模型")
+                    if not MODELS[selected].is_file():
+                        raise ValueError("本机尚未安装这个检测模型")
+                    if selected != monitor.model_key:
+                        atomic_write(monitor.model_setting, selected.encode("utf-8"))
+                        monitor.model_key = selected
+                        monitor.revision += 1
                 elif route == "/api/detect":
                     enabled = data.get("enabled") is True
                     if enabled and (not monitor.frame or str(monitor.channel) not in monitor.regions):
                         raise ValueError("请先预览并框选区域")
-                    if enabled and not MODEL.is_file():
+                    if enabled and not MODELS[monitor.model_key].is_file():
                         raise ValueError("本机缺少人体检测模型")
                     if enabled and importlib.util.find_spec("onnxruntime") is None:
                         raise ValueError("本机缺少 ONNX Runtime，请先安装检测依赖")
@@ -728,7 +861,7 @@ def main():
                     raise ValueError
             except (OSError, ValueError):
                 parser.error("无法读取已记住的账号，请重新保存账号")
-            detect = (str(args.autostart) in monitor.regions and MODEL.is_file()
+            detect = (str(args.autostart) in monitor.regions and MODELS[monitor.model_key].is_file()
                       and importlib.util.find_spec("onnxruntime") is not None)
             monitor.start(credentials, args.autostart, remember=False, record=True, detect=detect)
         url = "http://" + server.host

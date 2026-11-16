@@ -51,6 +51,8 @@ Windows DPAPI 加密的账号和密码、每路检测区域和截图保存在 `o
 
 人体检测使用 [OpenCV Zoo YOLOX INT8 模型](https://github.com/opencv/opencv_zoo/tree/main/models/object_detection_yolox)。下载下方的模型文件并保存为 `outputs/seetong-yolox.onnx`。本地取流依赖已安装的原厂 Seetong DLL。
 
+在监控页的「人体检测模型」中可以切换模型。将 [YOLOX-Nano 权重](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx) 下载为 `outputs/seetong-yolox-nano.onnx` 后，首次启动默认使用 Nano。服务会保存所选模型。遇到夜间强光或远处人员时，可切回原模型。Nano 权重的 SHA-256 为 `c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d`。
+
 [下载 object_detection_yolox_2022nov_int8.onnx](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/object_detection_yolox/object_detection_yolox_2022nov_int8.onnx)
 
 ## 固定本地取流依赖

@@ -29,8 +29,16 @@ canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-actio
   <div class="grid">
     <section class="panel preview">
       <div class="toolbar"><h2 id="videoTitle">实时画面</h2><strong class="count" id="count">区域人数 —</strong></div>
-      <canvas id="screen" width="640" height="360" aria-label="直播画面，拖动选择检测区域"></canvas>
-      <p class="help">画面出现后，拖动鼠标框出检测区域，再点「启动检测」。区域会按通道记住。</p>
+      <canvas id="screen" width="640" height="360" aria-label="直播画面和检测区域"></canvas>
+      <div class="help">
+        <button id="startPolygon" type="button" disabled>绘制多边形</button>
+        <span id="polygonActions" hidden>
+          <button id="undoPolygon" type="button">撤销上一点</button>
+          <button id="savePolygon" type="button">保存区域</button>
+          <button id="cancelPolygon" type="button">取消</button>
+        </span>
+        <p id="areaHelp" role="status">可拖动选择矩形，也可绘制多边形。区域按通道保存。</p>
+      </div>
     </section>
     <section class="panel controls">
       <h2>摄像头连接</h2>
@@ -45,6 +53,12 @@ canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-actio
         <div class="actions"><button class="primary" id="start">打开预览</button><button type="button" id="stop">停止连接</button></div>
       </form>
       <div class="actions"><button id="detect">启动检测</button><button id="forget">清除已记住的账号</button></div>
+      <span>人体检测模型</span>
+      <div class="actions" role="group" aria-label="人体检测模型">
+        <button type="button" id="modelNano" aria-pressed="false" disabled>Nano · 省 CPU</button>
+        <button type="button" id="modelOriginal" aria-pressed="false" disabled>原模型 · 夜间优先</button>
+      </div>
+      <small id="modelStatus" role="status"></small>
       <p class="error" id="error" role="alert"></p>
     </section>
   </div>
@@ -142,6 +156,21 @@ async function reloadExpiredSession() {
     // The next poll will retry if the tunnel or service is still coming back.
   }
 }
+let polygonDraft = null;
+let polygonChannel = null;
+let savingPolygon = false;
+function showAreaControls() {
+  const drawing = polygonDraft !== null;
+  byId('startPolygon').hidden = drawing;
+  byId('startPolygon').disabled = !bitmap;
+  byId('polygonActions').hidden = !drawing;
+  byId('undoPolygon').disabled = savingPolygon || !polygonDraft?.length;
+  byId('savePolygon').disabled = savingPolygon || (polygonDraft?.length ?? 0) < 3;
+  byId('cancelPolygon').disabled = savingPolygon;
+  byId('areaHelp').textContent = drawing
+    ? `沿边界依次点击拐角，至少 3 个点，再点「保存区域」。已选 ${polygonDraft.length} 点。`
+    : '可拖动选择矩形，也可绘制多边形。区域按通道保存。';
+}
 function draw() {
   ctx.fillStyle = '#091013'; ctx.fillRect(0, 0, 640, 360);
   if (bitmap) ctx.drawImage(bitmap, 0, 0, 640, 360);
@@ -149,12 +178,27 @@ function draw() {
     ctx.fillStyle = '#a9bcb7'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('等待摄像头画面', 320, 184);
   }
-  const region = previewRegion || state.regions?.[state.channel];
+  const region = polygonDraft ?? previewRegion ?? state.regions?.[state.channel];
   if (region && bitmap) {
-    const [x,y,r,b] = region;
+    let points = region;
+    if (typeof region[0] === 'number') {
+      const [x,y,r,b] = region;
+      points = [[x,y],[r,y],[r,b],[x,b]];
+    }
     ctx.fillStyle = '#69e5ab24'; ctx.strokeStyle = '#69e5ab'; ctx.lineWidth = 2;
-    ctx.fillRect(x*640,y*360,(r-x)*640,(b-y)*360);
-    ctx.strokeRect(x*640,y*360,(r-x)*640,(b-y)*360);
+    if (points.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(points[0][0]*640, points[0][1]*360);
+      for (const [x,y] of points.slice(1)) ctx.lineTo(x*640,y*360);
+      if (points.length >= 3) { ctx.closePath(); ctx.fill(); }
+      ctx.stroke();
+    }
+    if (polygonDraft) {
+      ctx.fillStyle = '#69e5ab';
+      for (const [x,y] of points) {
+        ctx.beginPath(); ctx.arc(x*640,y*360,4,0,Math.PI*2); ctx.fill();
+      }
+    }
   }
 }
 function position(event) {
@@ -163,7 +207,7 @@ function position(event) {
   return [bound((event.clientX-rect.left)/rect.width),bound((event.clientY-rect.top)/rect.height)];
 }
 screen.onpointerdown = event => {
-  if (!bitmap) return;
+  if (!bitmap || polygonDraft !== null) return;
   drag = position(event); screen.setPointerCapture(event.pointerId);
 };
 screen.onpointermove = event => {
@@ -185,6 +229,33 @@ screen.onpointerup = async () => {
   }
   previewRegion = null; draw();
 };
+byId('startPolygon').onclick = () => {
+  if (!bitmap) return;
+  polygonDraft = [];
+  polygonChannel = state.channel;
+  drag = previewRegion = null;
+  showAreaControls(); draw();
+};
+screen.onclick = event => {
+  if (!bitmap || polygonDraft === null || savingPolygon || polygonDraft.length >= 32) return;
+  polygonDraft.push(position(event));
+  showAreaControls(); draw();
+};
+byId('undoPolygon').onclick = () => { polygonDraft?.pop(); showAreaControls(); draw(); };
+byId('cancelPolygon').onclick = () => { polygonDraft = null; showAreaControls(); draw(); };
+byId('savePolygon').onclick = () => action(async () => {
+  if (savingPolygon || !polygonDraft || polygonDraft.length < 3) return;
+  savingPolygon = true;
+  showAreaControls();
+  try {
+    await request('/api/region', {region: polygonDraft, channel: polygonChannel});
+    state.regions[polygonChannel] = polygonDraft;
+    polygonDraft = null;
+  } finally {
+    savingPolygon = false;
+    showAreaControls(); draw();
+  }
+});
 async function action(fn) {
   byId('error').textContent = '';
   try { await fn(); } catch(error) { byId('error').textContent = error.message; }
@@ -207,6 +278,34 @@ byId('login').onsubmit = event => {
 byId('stop').onclick = () => action(() => request('/api/stop',{}));
 byId('forget').onclick = () => action(() => request('/api/forget',{}));
 byId('detect').onclick = () => action(() => request('/api/detect',{enabled:!state.detect}));
+const modelButtons = {nano: byId('modelNano'), original: byId('modelOriginal')};
+let savingModel = false;
+function showDetectorModel() {
+  const selected = state.detector_model;
+  for (const [key, button] of Object.entries(modelButtons)) {
+    button.disabled = savingModel || !state.detector_models?.[key];
+    button.setAttribute('aria-pressed', String(selected === key));
+    button.title = state.detector_models?.[key] ? '' : '尚未安装此模型';
+  }
+  const description = selected === 'nano'
+    ? '当前：Nano。夜间强光下可能漏检远处人员。'
+    : selected === 'original' ? '当前：原模型。' : '';
+  byId('modelStatus').textContent = selected && state.detect && selected !== state.active_detector_model
+    ? '正在切换检测模型…' : description;
+}
+for (const [key, button] of Object.entries(modelButtons)) {
+  button.onclick = () => action(async () => {
+    savingModel = true;
+    showDetectorModel();
+    try {
+      await request('/api/detector-model', {model: key});
+      state.detector_model = key;
+    } finally {
+      savingModel = false;
+      showDetectorModel();
+    }
+  });
+}
 function showAlertState() {
   const alerts = state.alerts;
   const enabled = alerts?.enabled;
@@ -446,8 +545,12 @@ async function updateEvents() {
 async function poll() {
   try {
     state = await (await request('/api/state')).json();
+    if (!savingPolygon && polygonDraft !== null && (state.channel !== polygonChannel || !state.active)) {
+      polygonDraft = null;
+    }
     showAlertState();
     showStorage();
+    showDetectorModel();
     byId('status').textContent = state.message;
     byId('videoTitle').textContent = state.active ? `第 ${state.channel} 路实时画面` : '实时画面';
     byId('count').textContent = '区域人数 ' + (state.count ?? '—');
@@ -470,6 +573,7 @@ async function poll() {
       const next = state.sequence ? await createImageBitmap(await (await request('/api/frame')).blob()) : null;
       bitmap?.close(); bitmap = next; lastSequence = state.sequence;
     }
+    showAreaControls();
     draw();
   } catch(error) {
     byId('status').textContent = '本机服务暂不可用';
