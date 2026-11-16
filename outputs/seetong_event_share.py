@@ -11,7 +11,8 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlsplit
 
-from seetong_recording import CREATE_NO_WINDOW, EVENT_NAME, SHOT_NAME, playback_command
+from seetong_recording import (CREATE_NO_WINDOW, EVENT_NAME, SHOT_NAME,
+                               playback_command, probe_recording, recording_duration)
 
 LINK_SECONDS = 24 * 60 * 60
 ROUTE = re.compile(r"/event/([^/]+)/(\d{10,12})/([0-9a-f]{64})/(snapshot\.jpg|video\.mp4)?")
@@ -76,7 +77,9 @@ class EventShare:
             raise OSError("ffmpeg unavailable")
         video = tempfile.TemporaryFile()
         try:
-            subprocess.run(playback_command(ffmpeg, path), stdin=subprocess.DEVNULL,
+            codecs = set((probe_recording(path, "stream=codec_name") or b"").splitlines())
+            subprocess.run(playback_command(ffmpeg, path, copy_video=codecs == {b"h264"}),
+                           stdin=subprocess.DEVNULL,
                            stdout=video, stderr=subprocess.DEVNULL, check=True, timeout=120,
                            creationflags=CREATE_NO_WINDOW)
             if not video.seek(0, 2):
@@ -152,6 +155,11 @@ class EventShareHandler(BaseHTTPRequestHandler):
         local_time = datetime.fromtimestamp(int(timestamp) // 1_000_000_000)
         count = f" · {counts[0]} → {counts[1]} 人" if counts else ""
         preview = '<img src="snapshot.jpg" alt="区域事件抓拍">' if snapshot else '<p>本次事件暂无抓拍图</p>'
+        duration = recording_duration(recording)
+        duration_label = ""
+        if duration is not None:
+            minutes, seconds = divmod(int(duration + 0.5), 60)
+            duration_label = f" · 总时长 {minutes:02d}:{seconds:02d}"
         return self.reply(f"""<!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>区域事件回看</title>
@@ -162,7 +170,7 @@ class EventShareHandler(BaseHTTPRequestHandler):
   p {{ margin:0 0 16px; color:#afc4be }} img,video {{ display:block; width:100%; border-radius:12px; background:#000 }}
 </style>
 <main><h1>第 {channel} 路 · 区域事件</h1><p>{local_time:%Y-%m-%d %H:%M:%S}{count}</p>
-{preview}<h2>事件录像</h2><video src="video.mp4" controls playsinline preload="none"></video></main>
+{preview}<h2>事件录像{duration_label}</h2><video src="video.mp4" controls playsinline preload="none"></video></main>
 </html>""", mime="text/html; charset=utf-8")
 
     def video(self, recording):

@@ -31,7 +31,7 @@ from PIL import Image, ImageDraw
 from seetong_alerts import MobileAlerts, PushError, TOKEN, load_recipients
 from seetong_event_share import EventShare, EventShareHandler
 from seetong_recording import (DEFAULT_LIMITS, EVENT_NAME, NAME, SHOT_NAME,
-                               Recording, RecordingStorage, playback_command)
+                               Recording, RecordingStorage, playback_command, recording_duration)
 from seetong_wine import WineCapture, native_capture
 
 ROOT = Path(__file__).resolve().parent
@@ -159,18 +159,28 @@ class PersonDetector:
 
 
 class StableCount:
+    RISE_SECONDS = 1.0
+    FALL_SECONDS = 2.0
+    CLEAR_SECONDS = 5.0
+    MAX_SAMPLE_GAP = 2.0
+
     def __init__(self):
         self.count = 0
         self.candidate = 0
         self.since = 0
+        self.last_sample = None
 
     def observe(self, number, now):
-        if number != self.candidate:
+        if (number != self.candidate or self.last_sample is None
+                or now - self.last_sample > self.MAX_SAMPLE_GAP):
             self.candidate, self.since = number, now
-        if number == self.count or now - self.since < 1:
+        self.last_sample = now
+        delay = (self.CLEAR_SECONDS if number == 0 else
+                 self.RISE_SECONDS if number > self.count else self.FALL_SECONDS)
+        if number == self.count or now - self.since < delay:
             return None
         previous, self.count = self.count, number
-        return (previous, number) if number > previous else None
+        return previous, number
 
 
 class Monitor:
@@ -293,14 +303,14 @@ class Monitor:
                     region = self.regions.get(str(self.channel))
                 if current_revision != revision:
                     stable, revision = StableCount(), current_revision
-                increase = None
+                change = None
                 if detect and region:
                     detector = detector or PersonDetector()
                     x0, y0, x1, y1 = region
                     visible = [box for box in detector.boxes(image)
                                if x0 <= (box[0] + box[2]) / (2 * WIDTH) <= x1
                                and y0 <= box[3] / HEIGHT <= y1]
-                    increase = stable.observe(len(visible), now)
+                    change = stable.observe(len(visible), now)
                     overlay = ImageDraw.Draw(image)
                     for box in visible:
                         overlay.rectangle(tuple(map(int, box)), outline="#69e5ab", width=2)
@@ -313,10 +323,10 @@ class Monitor:
                     self.count = stable.count if detect else None
                     self.message = "检测中" if detect else "预览中"
                     if recording and recording.events:
-                        recording.events.observe(bool(detect and region and stable.count), now, increase, jpeg)
+                        recording.events.observe(bool(detect and region and stable.count), now, change, jpeg)
                         self.event_recording = recording.events.file is not None
-                    elif increase:
-                        self.storage.snapshot(self.channel, increase, jpeg)
+                    elif change:
+                        self.storage.snapshot(self.channel, change, jpeg)
         finally:
             sdk_done.set()
             try:
@@ -433,6 +443,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply({}, 404)
         if self.headers.get("X-Seetong-Session") != self.server.token:
             return self.reply({}, 403)
+        if route.startswith(("/api/event/duration/", "/api/recordings/duration/")):
+            path = self.recording_path(route)
+            return self.reply({"seconds": recording_duration(path)}) if path else self.reply({}, 404)
         if route == "/api/events":
             return self.reply([path.name for path in sorted(RECORDINGS.glob("*-event.ts"), reverse=True)
                                if EVENT_NAME.fullmatch(path.name) and not path.is_symlink()])
@@ -512,12 +525,19 @@ class Handler(BaseHTTPRequestHandler):
             entry["shots"].append({"name": path.name, "time": at, "previous": int(previous), "count": int(count)})
         return sorted(entries, key=lambda entry: entry["time"], reverse=True)
 
-    def recording_video(self, route):
+    def recording_path(self, route):
         name = route.rsplit("/", 1)[1]
         path = RECORDINGS / name
         match = EVENT_NAME.fullmatch(name) or NAME.fullmatch(name)
         if not match or path.is_symlink() or not path.is_file():
+            return None
+        return path
+
+    def recording_video(self, route):
+        path = self.recording_path(route)
+        if path is None:
             return self.reply({}, 404)
+        name = path.name
         if route.startswith(("/api/event/download/", "/api/recordings/download/")):
             try:
                 with path.open("rb") as source:

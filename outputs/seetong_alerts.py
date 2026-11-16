@@ -50,9 +50,10 @@ def send(token, title, content, link=None):
     except HTTPError as error:
         error.close()
         raise PushError(f"推送服务返回 HTTP {error.code}",
-                        retry=error.code == 429 or 500 <= error.code < 600) from None
+                        retry=error.code == 429) from None
     except OSError:
-        raise PushError("暂时无法连接 WxPusher", retry=True) from None
+        # A timeout can happen after delivery. Avoid sending the same alert again.
+        raise PushError("未能确认 WxPusher 是否收到提醒") from None
     except ValueError:
         raise PushError("无法读取 WxPusher 的响应") from None
     if not isinstance(result, dict) or result.get("code") != 1000:

@@ -13,7 +13,12 @@ canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-actio
 .event-list{display:grid;gap:8px;margin:12px 0 0;padding:0;list-style:none}.event-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.event-row span{flex:1;min-width:210px}.event-row a{color:var(--mint);padding:8px}dialog video{display:block;width:min(82vw,880px);max-height:72vh;margin-top:12px;background:#091013}
 .alerts summary{cursor:pointer;font-weight:600}.alerts form{max-width:480px;margin-top:12px}.alerts a{color:var(--mint)}
 .local-file-notice{max-width:620px}.local-file-notice p{margin-top:12px;line-height:1.6}.local-file-notice a{color:var(--mint)}
-.header-actions,.history-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.history-filters{padding-bottom:12px}.history-filters label{flex:1;min-width:120px}.history-dialog{width:min(92vw,740px);max-height:85vh}.history-dialog .toolbar{padding:0 0 14px}.history-list{margin-top:0}.recording-text{display:grid;gap:4px}.device-list{max-width:600px}.device-list strong{overflow-wrap:anywhere}
+.header-actions,.history-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.history-filters{padding-bottom:12px}.history-filters label{flex:1;min-width:120px}.recording-text{display:grid;gap:4px}.device-list{max-width:600px}.device-list strong{overflow-wrap:anywhere}
+.history-dialog{width:min(92vw,740px);max-height:85vh;max-height:85dvh}
+.history-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+.history-dialog .toolbar{padding:0 0 14px}
+.history-dialog .toolbar,.history-dialog .history-filters{flex-shrink:0}
+.history-list{margin:0;min-height:0;overflow:auto;overscroll-behavior:contain}
 .event-cards{display:grid;gap:14px;margin:14px 0 0;padding:0;list-style:none}.event-card{display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:16px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#152023}.event-card .shot{width:100%;align-self:start}.event-thumb-empty{display:grid;place-items:center;aspect-ratio:16/9;background:#10181b;border-radius:8px}.event-body{display:grid;align-content:start;gap:8px}.event-body .actions{align-items:center}.event-body .actions button{flex:none}.event-body a{color:var(--mint);padding:8px}.event-timeline{display:grid;gap:5px;padding:0;list-style:none}.event-change{padding:4px 0;border:0;background:transparent;color:#c5d7d1;text-align:left}.event-change:hover{text-decoration:underline}.event-change time{color:var(--mint);margin-right:8px;font-variant-numeric:tabular-nums}.storage-form{max-width:640px;display:grid;gap:12px;margin-top:14px}.storage-limits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.storage-form button{justify-self:start}.history-list .event-card{grid-template-columns:minmax(120px,180px) minmax(0,1fr)}
 @media(max-width:520px){.event-card,.history-list .event-card,.storage-limits{grid-template-columns:1fr}}
 </style>
@@ -70,7 +75,13 @@ canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-actio
     </form>
   </details>
   <section class="panel snapshots">
-    <div class="toolbar" style="padding:0"><h2>区域事件</h2><small id="eventStatus"></small></div>
+    <div class="toolbar" style="padding:0;flex-wrap:wrap">
+      <h2>最近区域事件</h2>
+      <div class="header-actions">
+        <small id="eventStatus"></small>
+        <button id="openEventHistory" type="button">查看全部事件</button>
+      </div>
+    </div>
     <ul class="event-cards" id="eventList"><li><small>正在读取事件…</small></li></ul>
   </section>
 </main>
@@ -84,7 +95,7 @@ canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-actio
   </div>
   <ul class="event-list history-list" id="historyList" aria-live="polite"></ul>
 </dialog>
-<dialog id="eventViewer" aria-labelledby="clipTitle"><div class="toolbar"><h2 id="clipTitle">录像回看</h2><button id="closeEvent">关闭</button></div><video id="eventPlayer" controls playsinline></video><p class="error" id="eventError" role="alert"></p></dialog>
+<dialog id="eventViewer" aria-labelledby="clipTitle"><div class="toolbar"><div><h2 id="clipTitle">录像回看</h2><small id="clipDuration" role="status"></small></div><button id="closeEvent">关闭</button></div><video id="eventPlayer" controls playsinline></video><p class="error" id="eventError" role="alert"></p></dialog>
 <template id="localFileNotice">
   <section class="panel local-file-notice">
     <h1>从监控服务打开页面</h1>
@@ -117,9 +128,19 @@ async function request(path, data) {
   const result = await fetch(path, options);
   if (!result.ok) {
     const error = await result.json().catch(() => ({}));
-    throw new Error(error.error || '本机请求失败');
+    throw Object.assign(new Error(error.error || '本机请求失败'), {status:result.status});
   }
   return result;
+}
+async function reloadExpiredSession() {
+  try {
+    const page = await fetch('/', {cache:'no-store', signal:AbortSignal.timeout(8000)});
+    if (!page.ok) return;
+    const current = (await page.text()).match(/const session = '([a-f0-9]{64})';/)?.[1];
+    if (current && current !== session) location.reload();
+  } catch (_) {
+    // The next poll will retry if the tunnel or service is still coming back.
+  }
 }
 function draw() {
   ctx.fillStyle = '#091013'; ctx.fillRect(0, 0, 640, 360);
@@ -215,7 +236,8 @@ function showAlertState() {
   }
   list.querySelectorAll('button').forEach(button => {button.disabled = alertBusy;});
   const label = alerts ? (enabled ? '提醒已启用' : '提醒未启用') : '等待新版监控服务连接';
-  byId('alertStatus').textContent = alerts?.last_result ? `${label} · ${alerts.last_result}` : label;
+  const media = enabled ? (state.event_share ? '提醒内可打开截图和录像' : '仅文字 · 未配置手机可访问的录像链接') : '';
+  byId('alertStatus').textContent = [label, media, alerts?.last_result].filter(Boolean).join(' · ');
 }
 async function updateAlerts(route, data, success) {
   alertBusy = true; showAlertState();
@@ -266,7 +288,9 @@ byId('viewer').onclose = () => {
 };
 const eventPlayer = byId('eventPlayer');
 byId('closeEvent').onclick = () => byId('eventViewer').close();
+let playbackRequest = 0;
 byId('eventViewer').onclose = () => {
+  playbackRequest++;
   eventPlayer.pause(); eventPlayer.removeAttribute('src'); eventPlayer.load();
 };
 eventPlayer.onerror = () => {
@@ -277,13 +301,31 @@ function showListMessage(list, message) {
   label.textContent = message;
   row.append(label); list.replaceChildren(row);
 }
-function playRecording(recording, endpoint) {
+async function playRecording(recording, endpoint) {
+  const generation = ++playbackRequest;
+  const duration = byId('clipDuration');
   byId('eventError').textContent = '';
   const type = recording.type === 'event' ? '事件录像' : '普通录像';
   byId('clipTitle').textContent = `第 ${recording.channel} 路 · ${type}`;
-  eventPlayer.src = `/api/${endpoint}/play/${recording.name}?session=${session}`;
+  const name = encodeURIComponent(recording.name);
+  duration.textContent = '正在读取录像时长…';
+  eventPlayer.src = `/api/${endpoint}/play/${name}?session=${session}`;
   byId('eventViewer').showModal();
   eventPlayer.play().catch(() => {});
+  let seconds;
+  try {
+    ({seconds} = await (await request(`/api/${endpoint}/duration/${name}`)).json());
+  } catch {}
+  if (generation !== playbackRequest) return;
+  if (!Number.isFinite(seconds)) {
+    duration.textContent = '暂时无法读取总时长';
+    return;
+  }
+  const total = Math.ceil(seconds);
+  const minutes = Math.floor(total / 60);
+  const time = [Math.floor(minutes / 60), minutes % 60, total % 60]
+    .slice(minutes >= 60 ? 0 : 1).map(value => String(value).padStart(2, '0')).join(':');
+  duration.textContent = `总时长 ${time}`;
 }
 function recordingRow(recording, endpoint) {
   const {name, type, channel, time, size} = recording;
@@ -372,11 +414,15 @@ async function loadHistory() {
     showListMessage(byId('historyList'), '无法读取录像列表，请刷新重试');
   } finally { refresh.disabled = false; }
 }
-byId('openHistory').onclick = () => {
+function openHistory(type) {
+  byId('historyType').value = type;
+  byId('historyDate').value = '';
   showListMessage(byId('historyList'), '正在读取录像…');
   byId('historyViewer').showModal();
   loadHistory();
-};
+}
+byId('openHistory').onclick = () => openHistory('');
+byId('openEventHistory').onclick = () => openHistory('event');
 byId('closeHistory').onclick = () => byId('historyViewer').close();
 byId('refreshHistory').onclick = loadHistory;
 byId('historyType').onchange = showHistory;
@@ -428,6 +474,7 @@ async function poll() {
   } catch(error) {
     byId('status').textContent = '本机服务暂不可用';
     if (bitmap) {bitmap.close(); bitmap = null; lastSequence = 0; draw();}
+    if (error.status === 403) await reloadExpiredSession();
   } finally { setTimeout(poll, 220); }
 }
 draw(); poll(); updateEvents();

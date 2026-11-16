@@ -1,7 +1,9 @@
 """Receive FFmpeg segments locally and enforce the disk limit before writing."""
 
+import math
 import re
 import secrets
+import shutil
 import subprocess
 import threading
 import time
@@ -24,11 +26,37 @@ EVENT_BUFFER_BYTES = 24 * 1024 * 1024
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def playback_command(ffmpeg, path):
+def probe_recording(path, field):
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+    try:
+        result = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", field,
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=4, check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def recording_duration(path):
+    try:
+        seconds = float(probe_recording(path, "format=duration") or 0)
+        return seconds if math.isfinite(seconds) and seconds > 0 else None
+    except ValueError:
+        return None
+
+
+def playback_command(ffmpeg, path, *, copy_video=False):
+    encoding = (["-c:v", "copy"] if copy_video else
+                ["-c:v", "libx264", "-threads", "2", "-preset", "ultrafast",
+                 "-pix_fmt", "yuv420p", "-g", "30"])
     return [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-threads", "2", "-i", str(path),
-        "-map", "0:v:0", "-an", "-c:v", "libx264", "-threads", "2", "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p", "-g", "30", "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+        "-map", "0:v:0", "-an", *encoding, "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
         "-f", "mp4", "pipe:1",
     ]
 
@@ -186,12 +214,23 @@ class Recording:
 
     def segment_args(self, mode, seconds):
         url = f"http://127.0.0.1:{self.servers[mode].server_port}/{self.token}/%06d.ts"
-        # Raw SDK frames can have placeholder timestamps. Pace them at the demuxer's
-        # frame duration, with a 25 fps fallback for unusably short durations.
-        timing = "setts=ts='N*max(DURATION,0.04/TB)'"
+        if mode == "event":
+            # Cameras can send keyframes tens of seconds apart. Encode the event
+            # buffer separately so it gets a decodable segment every two seconds.
+            fps = 10
+            gop = str(fps * seconds)
+            encoding = [
+                "-vf", f"fps={fps},scale=w='min(iw,1280)':h=-2",
+                "-c:v", "libx264", "-threads", "2", "-preset", "ultrafast",
+                "-tune", "zerolatency", "-pix_fmt", "yuv420p", "-crf", "25",
+                "-g", gop, "-keyint_min", gop, "-sc_threshold", "0",
+            ]
+        else:
+            # Raw SDK frames can have placeholder timestamps.
+            timing = "setts=ts='N*max(DURATION,0.04/TB)'"
+            encoding = ["-c:v", "copy", "-bsf:v", timing]
         return [
-            "-map", "0:v:0", "-an", "-c:v", "copy",
-            "-bsf:v", timing, "-f", "segment",
+            "-map", "0:v:0", "-an", *encoding, "-f", "segment",
             "-segment_format", "mpegts", "-segment_time", str(seconds),
             "-reset_timestamps", "1" if mode == "continuous" else "0",
             "-segment_format_options", "mpegts_flags=+initial_discontinuity",
@@ -212,7 +251,10 @@ class EventClips:
     def observe(self, occupied, now, increase=None, jpeg=None):
         with self.recording.lock:
             if occupied:
-                self.tail_until = None
+                if self.tail_until is not None:
+                    # The stable counter already confirmed the previous departure.
+                    # A new entry is a separate event even before the tail is flushed.
+                    self.finish()
                 if self.file is None:
                     self.trim(now)
                     self.path = self.recording.folder / f"{time.time_ns():019d}-ch{self.channel}-event.part"
