@@ -1,4 +1,5 @@
 /work/
+/.venv/
 /outputs/seetong-data/
 /outputs/seetong-sdk/
 /outputs/seetong-yolox.onnx

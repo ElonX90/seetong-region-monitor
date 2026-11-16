@@ -1,0 +1,23 @@
+[Unit]
+Description=Seetong camera recorder
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=seetong-monitor
+Group=seetong-monitor
+WorkingDirectory=/opt/seetong-monitor
+StateDirectory=seetong-monitor
+StateDirectoryMode=0700
+Environment=HOME=/var/lib/seetong-monitor
+Environment=WINEPREFIX=/var/lib/seetong-monitor/wine
+Environment=WINEDEBUG=-all
+UMask=0077
+ExecStart=/usr/bin/xvfb-run -a /opt/seetong-monitor/venv/bin/python -B -u /opt/seetong-monitor/outputs/seetong-monitor.py --wine-python /opt/seetong-monitor/win-python/tools/python.exe --data-dir /var/lib/seetong-monitor/data --port 18767 --autostart 1 --no-browser
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

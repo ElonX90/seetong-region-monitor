@@ -20,23 +20,22 @@ flowchart LR
 | 模块 | 实现 |
 | --- | --- |
 | 云取流 | `seetong-login-probe.py` 登录 Seetong 云端，读取设备列表及 P2P 信令配置。原厂 SDK 注册设备，按从 1 开始的通道号订阅视频，媒体回调将压缩包交给 FFmpeg。 |
-| Windows 与 Linux | `seetong-monitor.py` 在 Windows 直接加载原厂 SDK。在 Linux 或 WSL 上，它启动 `seetong_wine.py`，由 Wine 内的 Windows x64 Python 加载同一套 DLL。子进程通过标准输入接收连接参数，经带临时令牌的回环 TCP 连接传回视频包。Linux 主进程负责解码、检测、录像和网页，断流时会尝试重连。 |
+| Windows 与 Linux | `seetong-monitor.py` 启动 `seetong_wine.py` 作为取流子进程。Windows 使用本机 Python 加载原厂 SDK，Linux 或 WSL 使用 Wine 内的 Windows x64 Python 加载同一套 DLL。子进程通过标准输入接收连接参数，经带临时令牌的回环 TCP 连接传回视频包。主进程负责解码、检测、录像和网页。解码长时间没有新帧或取流退出时，主进程清理旧连接并自动重连。 |
 | 预览与人数检测 | FFmpeg 解码画面，Python 用 ONNX Runtime 运行 YOLOX，合并重复人体框，以人体框底边中心判断人是否在选定区域内。人数稳定约 1 秒后更新，增加时保存带检测框的 JPEG。网页以轮询方式读取预览、人数和事件列表，检测区域按通道保存。 |
 | 事件与连续录像 | `seetong_recording.py` 接收 FFmpeg 按原视频编码封装的 MPEG-TS 分段。事件分段先短暂缓存在内存中，区域有人时写入事件文件，清空并经过尾录时间后结束。连续录像可独立开启。两类录像各有磁盘配额，写入前清理相应类型最旧的已保存文件。 |
 | 消息与手机回看 | `seetong_alerts.py` 在事件录像保存后向绑定的 WxPusher 设备发送消息。启用 HTTPS 回看时，`seetong_event_share.py` 提供独立的回环服务，按文件名和到期时间校验签名，仅提供该事件的描述、抓拍和视频。首次播放时用 FFmpeg 转成 H.264 MP4，并支持浏览器按字节范围读取和拖动进度。 |
 
-监控网页和控制 API 只监听回环地址。Windows 默认端口为 `8765`，下文 Linux 和 WSL 示例用 `18765`。事件回看使用独立端口 `18766`，只有配置手机访问地址时才开启。录像、截图、区域设置、容量配置和凭据都放在运行时数据目录，默认是 `outputs/seetong-data/`，可用 `--data-dir` 改动。仓库忽略默认数据目录、签名密钥、SDK 副本和模型文件。
+监控网页和控制 API 只监听回环地址。Windows 默认端口为 `8765`，Ubuntu 一键部署用 `18767`，手动启动示例用 `18765`。启用手机回看时，事件回看服务默认使用独立端口 `18766`。录像、截图、区域设置、容量配置和凭据都放在运行时数据目录，直接启动时默认是 `outputs/seetong-data/`，可用 `--data-dir` 改动。仓库忽略默认数据目录、签名密钥、SDK 副本和模型文件。
 
-## 启动
+`start.cmd` 是 Windows 入口，`deploy/` 放 Ubuntu 安装脚本和系统服务，`outputs/` 放应用程序与运行时校验清单。
 
-需要本机安装 Seetong 1.0.12.3、64 位 Python，以及在 PATH 中可用的 FFmpeg。Python 环境需要 `numpy`、`onnxruntime` 和 `Pillow`。
+## Windows 本地一键启动
 
-```powershell
-python -m pip install numpy onnxruntime Pillow
-python .\outputs\seetong-monitor.py
-```
+克隆仓库后，双击根目录的 `start.cmd`。首次运行需要联网，脚本会检查 Python 和 FFmpeg，缺少时用 WinGet 安装，然后创建项目内的 `.venv`、安装 Python 依赖并下载和校验 YOLOX 模型。已有监控服务运行时，脚本直接打开监控页。
 
-也可以双击 `outputs\启动监控.cmd`。浏览器访问 `http://127.0.0.1:8765/`。登录后选择通道并打开预览，在画面里拖出矩形，然后点击「启动检测」。
+取流需要本机已安装相匹配的 Seetong 1.0.12.3 Windows 客户端，或已有下文所述的 SDK 副本。脚本会从默认安装目录复制并校验所需 DLL。若电脑没有 WinGet，可先安装 64 位 Python 3.11、3.12 或 3.13，并把 `python` 和 `ffmpeg` 加入 PATH。
+
+脚本打开 `http://127.0.0.1:8765/`。首次使用时，输入自己的 Seetong 账号，选择通道并打开预览，在画面里拖出矩形，然后点击「启动检测」。也可双击 `outputs\启动监控.cmd` 进入同一流程。Linux 和 WSL 请按下文部署。
 
 Windows DPAPI 加密的账号和密码、每路检测区域和截图保存在 `outputs/seetong-data/`。清除已保存的账号可在页面上操作。关闭启动窗口即可停止本机服务。
 
@@ -58,9 +57,35 @@ Windows DPAPI 加密的账号和密码、每路检测区域和截图保存在 `o
 
 仓库包含 SHA-256 清单和复制脚本。DLL 文件保存在本机。固定版本可隔离官方桌面客户端升级，取流仍依赖 Seetong 云服务和摄像头固件的兼容性。
 
-## Linux 云服务器
+### DLL 调用方式的来源
 
-Linux 主进程运行检测、录像、网页和提醒。Seetong 云取流由独立的 Wine 进程加载同一套 Windows x64 SDK，并通过本机回环端口把视频交给主进程。云取流掉线后会自动重连。已在 WSL Ubuntu 24.04.4 x86_64、Wine 9.0 上验证实况取流、检测、录像和重启恢复。部署到云服务器后还需验证服务器网络下的取流和长期运行。
+先用 REA 检查 `Funclib.dll` 的 PE 导出表，再用反汇编定位播放函数并推断参数的用途。导出表能确认函数名和地址。参数类型、实际取值和调用顺序通过反汇编与运行时观察交叉确认。
+
+`outputs/seetong-official-trace.py` 用 Frida 跟踪官方客户端正常播放时的 SDK 调用。在实测中，客户端通过 `FC_AddWatch(key, 1, 0, 1)` 请求播放，`key` 由设备 ID 和通道号组成。`outputs/seetong-login-probe.py` 用 `ctypes` 声明调用和媒体回调，在登录自己的账号并取得设备及信令配置后复现该流程。回调收到的视频包再交给 FFmpeg 解码验证。
+
+## Ubuntu 云服务器一键部署
+
+需要一台启用了 systemd 的 Ubuntu 24.04 x86_64 服务器。从已有的 Windows Seetong 1.0.12.3 安装中准备上面校验过的 SDK 文件，并私下复制到服务器。装过本项目的服务器可复用已安装的 SDK。
+
+```sh
+git clone https://github.com/ElonX90/seetong-region-monitor.git
+cd seetong-region-monitor
+sudo bash deploy/install-ubuntu.sh /path/to/seetong-sdk/1.0.12.3
+```
+
+如果 SDK 已放在克隆目录的 `outputs/seetong-sdk/1.0.12.3/`，可省略路径参数。脚本校验 SDK，安装 Wine、FFmpeg 和 Python 依赖，下载并校验 Windows x64 Python 和 YOLOX 模型，最后以专用账号启动 `seetong-monitor.service` 并设为开机自启。程序安装在 `/opt/seetong-monitor/`，设置和录像保存在 `/var/lib/seetong-monitor/data/`。
+
+在自己的电脑运行下面的命令，把 `USER@SERVER` 换成服务器的 SSH 用户和地址。保留该终端，浏览器打开 `http://127.0.0.1:18767/`。
+
+```sh
+ssh -N -L 127.0.0.1:18767:127.0.0.1:18767 USER@SERVER
+```
+
+首次打开网页时，填写自己的 Seetong 账号，选第 1 路，勾选「在本机记住账号和密码」和「同时保存连续录像」，点击「打开预览」。账号会保存在服务器的数据目录。之后系统服务会自动恢复第 1 路的连续录像。需要人数检测时，在预览中框选区域并开启检测。用 `systemctl status seetong-monitor` 或 `journalctl -u seetong-monitor -f` 查看服务状态和日志。
+
+## Linux 与 WSL 手动运行
+
+Linux 主进程运行检测、录像、网页和提醒。Wine 子进程加载 Windows x64 SDK，用回环连接转发视频。已在 WSL Ubuntu 24.04.4 和阿里云 Ubuntu 24.04.2 的 x86_64 环境验证摄像头取流和重启后恢复录像。
 
 以下命令适用于 Debian 或 Ubuntu x86_64。把项目及本机已校验的 `outputs/seetong-sdk/1.0.12.3/` 和 `outputs/seetong-yolox.onnx` 私下复制到服务器。可同时复制 `seetong-data` 中的 `regions.json` 和 `storage.json`，以保留检测区域和容量设置。Windows 的 DPAPI 凭据需要在 Linux 网页上重新输入。
 

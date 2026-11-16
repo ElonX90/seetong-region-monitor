@@ -32,7 +32,7 @@ from seetong_alerts import MobileAlerts, PushError, TOKEN, load_recipients
 from seetong_event_share import EventShare, EventShareHandler
 from seetong_recording import (DEFAULT_LIMITS, EVENT_NAME, NAME, SHOT_NAME,
                                Recording, RecordingStorage, playback_command)
-from seetong_wine import WineCapture, load_probe
+from seetong_wine import WineCapture, native_capture
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "seetong-data"
@@ -45,7 +45,6 @@ STORAGE_SETTINGS = DATA / "storage.json"
 MODEL = ROOT / "seetong-yolox.onnx"
 WIDTH, HEIGHT = 640, 360
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-probe = None
 
 
 class Blob(c.Structure):
@@ -179,7 +178,7 @@ class Monitor:
         self.lock = threading.RLock()
         self.stop = threading.Event()
         self.worker = None
-        self.wine_capture = wine_capture
+        self.capture = wine_capture if wine_capture is not None else native_capture()
         self.channel = 1
         self.message = "就绪"
         self.frame = None
@@ -352,12 +351,7 @@ class Monitor:
                     self.stream(packets, done, recording)
 
                 try:
-                    if self.wine_capture:
-                        self.run_wine_capture(channel, credentials, consume)
-                    else:
-                        native = probe or load_probe()
-                        native.main(["--capture", "--channel", str(channel)],
-                                    credentials=credentials, consumer=consume)
+                    self.run_capture(channel, credentials, consume)
                     with self.lock:
                         self.message = "已停止" if self.stop.is_set() else "连接结束，请检查账号、设备和网络"
                 except Exception as exc:
@@ -372,15 +366,15 @@ class Monitor:
             self.worker = threading.Thread(target=run, daemon=True)
             self.worker.start()
 
-    def run_wine_capture(self, channel, credentials, consume):
+    def run_capture(self, channel, credentials, consume):
         delay = 5
         while not self.stop.is_set():
             sequence = self.sequence
             try:
-                self.wine_capture.run(channel, credentials, consume, self.stop)
+                self.capture.run(channel, credentials, consume, self.stop)
                 reason = "视频连接结束"
             except (OSError, RuntimeError) as error:
-                reason = str(error) if isinstance(error, RuntimeError) else "无法启动 Wine 取流"
+                reason = str(error) if isinstance(error, RuntimeError) else "取流或录像发生系统错误"
             if self.stop.is_set():
                 break
             if self.sequence != sequence:
@@ -389,6 +383,7 @@ class Monitor:
                 self.frame = None
                 self.count = None
                 self.message = f"{reason}，{delay} 秒后重连"
+            print(f"{datetime.now():%Y-%m-%d %H:%M:%S} 第 {channel} 路：{self.message}", flush=True)
             if self.stop.wait(delay):
                 break
             delay = min(delay * 2, 60)
