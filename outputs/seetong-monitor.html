@@ -186,6 +186,7 @@ dialog .toolbar { padding: 0 0 12px; }
       </form>
       <section aria-labelledby="modelHeading">
         <h3 id="modelHeading">人体检测模型</h3>
+        <label>应用范围<select id="modelScope"><option value="channel">当前通道</option><option value="all">全部三路</option></select></label>
         <div class="action-grid" role="group" aria-label="人体检测模型">
           <button type="button" id="modelNano" aria-pressed="false" disabled>Nano · 省 CPU</button>
           <button type="button" id="modelOriginal" aria-pressed="false" disabled>原模型</button>
@@ -511,8 +512,8 @@ function showChannelPlan() {
     }
   }
   const ready = Object.keys(channelPlan).length === 3;
-  byId('start').disabled = starting || !ready || (!planEdits.size && state.can_start);
-  byId('applyConnection').disabled = starting || !ready;
+  byId('start').disabled = starting || savingModel || !ready || (!planEdits.size && state.can_start);
+  byId('applyConnection').disabled = starting || savingModel || !ready;
 }
 async function showCameras(channels, grid) {
   byId('cameraGrid').hidden = !grid;
@@ -561,7 +562,7 @@ async function showCameras(channels, grid) {
 }
 byId('login').onsubmit = event => {
   event.preventDefault();
-  if (starting || Object.keys(channelPlan).length !== 3) return;
+  if (starting || savingModel || Object.keys(channelPlan).length !== 3) return;
   const channels = Object.fromEntries(Object.entries(channelPlan).map(([id,config]) => [id,{...config}]));
   for (const [key,value] of planEdits) {
     const [channel,field] = key.split(':');
@@ -604,31 +605,50 @@ byId('closeSettings').onclick = () => byId('settingsViewer').close();
 byId('applyConnection').onclick = () => byId('login').requestSubmit();
 byId('forget').onclick = () => action(() => request('/api/forget',{}), 'connectionError');
 const modelButtons = {nano: byId('modelNano'), original: byId('modelOriginal')};
+const modelScope = byId('modelScope');
 let savingModel = false;
 function showDetectorModel() {
-  const selected = state.detector_model;
+  const all = modelScope.value === 'all';
+  modelScope.disabled = savingModel;
+  byId('modelHeading').textContent = all ? '全部三路检测模型' : `第 ${focusedChannel} 路检测模型`;
+  const targetChannels = Object.values(channelPlan);
+  const common = targetChannels.length === 3 && targetChannels.every(config => config.model === targetChannels[0].model)
+    ? targetChannels[0].model : null;
+  const selected = all ? common : state.detector_model;
   for (const [key, button] of Object.entries(modelButtons)) {
-    button.disabled = savingModel || state.channel !== focusedChannel || !state.detector_models?.[key];
+    button.disabled = starting || savingModel || (all ? targetChannels.length !== 3 : state.channel !== focusedChannel)
+      || !state.detector_models?.[key];
     button.setAttribute('aria-pressed', String(selected === key));
     button.title = state.detector_models?.[key] ? '' : '尚未安装此模型';
   }
+  const target = all ? '三路均设为' : '当前';
   const description = selected === 'nano'
-    ? '当前：Nano。夜间强光下可能漏检远处人员。'
-    : selected === 'original' ? '当前：原模型。' : '';
-  byId('modelStatus').textContent = selected && state.detect && selected !== state.active_detector_model
+    ? `${target}：Nano。夜间强光下可能漏检远处人员。`
+    : selected === 'original' ? `${target}：原模型。` : all && targetChannels.length === 3 ? '三路的模型设置不同。' : '';
+  const switching = all ? (state.channels || []).some(item =>
+    item.sequence && item.detect && channelPlan[item.channel]?.model !== item.active_detector_model)
+    : state.detect && selected !== state.active_detector_model;
+  byId('modelStatus').textContent = savingModel || switching
     ? '正在切换检测模型…' : description;
 }
+modelScope.onchange = showDetectorModel;
 for (const [key, button] of Object.entries(modelButtons)) {
   button.onclick = () => action(async () => {
     savingModel = true;
     showDetectorModel();
+    showChannelPlan();
     try {
       const channel = focusedChannel;
-      await request('/api/detector-model', {channel, model: key});
-      if (focusedChannel === channel) state.detector_model = key;
+      const all = modelScope.value === 'all';
+      await request('/api/detector-model', {channel, model: key, scope:all ? 'all' : 'channel'});
+      for (const id of all ? Object.keys(channelPlan) : [channel]) {
+        if (channelPlan[id]) channelPlan[id].model = key;
+      }
+      if (all || focusedChannel === channel) state.detector_model = key;
     } finally {
       savingModel = false;
       showDetectorModel();
+      showChannelPlan();
     }
   });
 }
@@ -915,7 +935,6 @@ async function poll() {
       ? `普通录像 · 已用 ${(ordinary.used / 1e6).toFixed(1)} MB / ${ordinary.limit / 1e9} GB` : '';
     byId('eventStatus').textContent = enabled.some(item => item.event_recording) ? '正在保存区域事件' : '';
     byId('forget').disabled = !state.saved || enabled.some(item => item.active);
-    byId('modelHeading').textContent = `第 ${focusedChannel} 路检测模型`;
     await showCameras(enabled, grid);
     if (!grid && state.sequence !== lastSequence) {
       const generation = focusGeneration, sequence = state.sequence;

@@ -661,7 +661,8 @@ class Channels:
 
     def update(self, channel, **changes):
         raw = {str(key): dict(value) for key, value in self.config.items()}
-        raw[str(channel)].update(changes)
+        for key in raw if channel is None else (str(channel),):
+            raw[key].update(changes)
         self.apply(raw)
 
     def reconcile(self):
@@ -999,7 +1000,12 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("未知的人体检测模型")
                     if not MODELS[selected].is_file():
                         raise ValueError("本机尚未安装这个检测模型")
-                    if manager:
+                    scope = data.get("scope", "channel")
+                    if scope not in ("channel", "all") or (scope == "all" and not manager):
+                        raise ValueError("无效的模型切换范围")
+                    if scope == "all":
+                        manager.update(None, model=selected)
+                    elif manager:
                         manager.update(monitor.channel, model=selected)
                     elif selected != monitor.model_key:
                         atomic_write(monitor.model_setting, selected.encode("utf-8"))

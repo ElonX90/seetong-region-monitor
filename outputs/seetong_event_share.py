@@ -15,8 +15,8 @@ from urllib.parse import urlsplit
 from seetong_recording import (CREATE_NO_WINDOW, EVENT_NAME, SHOT_NAME,
                                playback_command, probe_recording, recording_duration)
 
-LINK_SECONDS = 24 * 60 * 60
-ROUTE = re.compile(r"/event/([^/]+)/(\d{10,12})/([0-9a-f]{64})/(snapshot\.jpg|video\.mp4|download\.mp4)?")
+RETENTION = "retained"
+ROUTE = re.compile(r"/event/([^/]+)/(retained|\d{10,12})/([0-9a-f]{64})/(snapshot\.jpg|video\.mp4|download\.mp4)?")
 RANGE = re.compile(r"bytes=(\d{0,20})-(\d{0,20})")
 
 
@@ -75,14 +75,13 @@ class EventShare(PlaybackCache):
         self.snapshots = snapshots
         super().__init__()
 
-    def signature(self, name, expires):
-        return hmac.digest(self.key, f"{name}\n{expires}".encode("ascii"), "sha256").hex()
+    def signature(self, name, lifetime):
+        return hmac.digest(self.key, f"{name}\n{lifetime}".encode("ascii"), "sha256").hex()
 
     def link(self, name):
         if self.recording(name) is None:
             return None
-        expires = int(time.time()) + LINK_SECONDS
-        return f"{self.base_url}/event/{name}/{expires}/{self.signature(name, expires)}/"
+        return f"{self.base_url}/event/{name}/{RETENTION}/{self.signature(name, RETENTION)}/"
 
     def latest_link(self):
         for recording in sorted(self.recordings.glob("*-event.ts"), reverse=True):
@@ -141,12 +140,12 @@ class EventShareHandler(BaseHTTPRequestHandler):
         route = ROUTE.fullmatch(self.path)
         if not route:
             return self.reply("找不到事件", 404)
-        name, expires, signature, asset = route.groups()
+        name, lifetime, signature, asset = route.groups()
         event = EVENT_NAME.fullmatch(name)
         share = self.server.share
-        if not event or not hmac.compare_digest(signature, share.signature(name, expires)):
+        if not event or not hmac.compare_digest(signature, share.signature(name, lifetime)):
             return self.reply("找不到事件", 404)
-        if int(expires) <= time.time():
+        if lifetime != RETENTION and int(lifetime) <= time.time():
             return self.reply("链接已过期", 410)
         recording = share.recording(name)
         if recording is None:
@@ -187,7 +186,7 @@ class EventShareHandler(BaseHTTPRequestHandler):
 <a class="download" href="download.mp4" download>下载录像（MP4）</a>
 <details><summary>App 内无法下载？</summary>
 <p>复制下方回看链接，用 Safari 或系统浏览器打开，再点「下载录像」。</p>
-<textarea readonly rows="3" aria-label="回看链接">{share.base_url}/event/{name}/{expires}/{signature}/</textarea>
+<textarea readonly rows="3" aria-label="回看链接">{share.base_url}/event/{name}/{lifetime}/{signature}/</textarea>
 </details></main>
 </html>""", mime="text/html; charset=utf-8")
 
