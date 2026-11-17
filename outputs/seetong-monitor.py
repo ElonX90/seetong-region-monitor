@@ -18,13 +18,14 @@ import tempfile
 import threading
 import time
 import webbrowser
+from collections import deque
 from bisect import bisect_right
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -259,9 +260,10 @@ class StableCount:
 
 
 class Monitor:
-    def __init__(self, wine_capture=None, event_share=None):
-        self.lock = threading.RLock()
-        self.playback = PlaybackCache(timeout=300)
+    def __init__(self, wine_capture=None, event_share=None, *, shared=None, infer=None):
+        self.infer = infer
+        self.lock = shared.lock if shared else threading.RLock()
+        self.playback = shared.playback if shared else PlaybackCache(timeout=300)
         self.stop = threading.Event()
         self.worker = None
         self.capture = wine_capture if wine_capture is not None else native_capture()
@@ -275,6 +277,12 @@ class Monitor:
         self.recording = False
         self.event_recording = False
         self.revision = 0
+        if shared:
+            self.storage, self.alerts, self.event_share = shared.storage, shared.alerts, shared.event_share
+            self.regions, self.exclusion_regions = shared.regions, shared.exclusion_regions
+            self.exclusion_settings, self.model_setting = shared.exclusion_settings, shared.model_setting
+            self.model_key = shared.model_key
+            return
         self.model_setting = DATA / "detector-model.txt"
         try:
             preferred = self.model_setting.read_text(encoding="utf-8").strip()
@@ -430,14 +438,27 @@ class Monitor:
                 shot = None
                 visible = None
                 if detect and region and captured >= next_detection:
-                    next_detection = captured + 0.45
-                    if loaded_model != model_key:
-                        detector = PersonDetector(model_key)
-                        loaded_model = model_key
-                    image = Image.frombytes("RGB", (WIDTH, HEIGHT), raw)
+                    with self.infer.turn(self.stop) if self.infer else nullcontext(True) as acquired:
+                        if not acquired or sdk_done.is_set():
+                            continue
+                        with self.lock:
+                            if current_revision != self.revision:
+                                continue
+                        try:
+                            captured, stream_epoch, raw = latest.get_nowait()
+                        except queue.Empty:
+                            pass
+                        next_detection = captured + 0.45
+                        if self.infer:
+                            detector = self.infer.detector(model_key)
+                        elif loaded_model != model_key:
+                            detector = PersonDetector(model_key)
+                            loaded_model = model_key
+                        image = Image.frombytes("RGB", (WIDTH, HEIGHT), raw)
+                        boxes = detector.boxes(image)
                     vertices = region_vertices(region)
                     excluded_vertices = region_vertices(excluded) if excluded else ()
-                    visible = [box for box in detector.boxes(image)
+                    visible = [box for box in boxes
                                if box_inside_regions(box, vertices, excluded_vertices)]
                     change = stable.observe(len(visible), captured, continuous=detection_epoch == stream_epoch)
                     detection_epoch = stream_epoch
@@ -505,7 +526,7 @@ class Monitor:
                         self.recording = False
                         self.event_recording = False
 
-            self.worker = threading.Thread(target=run, daemon=True)
+            self.worker = threading.Thread(target=run, name=f"seetong-camera-{channel}", daemon=True)
             self.worker.start()
 
     def run_capture(self, channel, credentials, consume):
@@ -531,9 +552,174 @@ class Monitor:
             delay = min(delay * 2, 60)
 
 
+class InferenceQueue:
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.queue = deque()
+        self.models = {}
+
+    @contextmanager
+    def turn(self, stop):
+        ticket = object()
+        with self.condition:
+            self.queue.append(ticket)
+            while self.queue[0] is not ticket and not stop.is_set():
+                self.condition.wait(.2)
+        try:
+            yield not stop.is_set()
+        finally:
+            with self.condition:
+                self.queue.remove(ticket)
+                self.condition.notify_all()
+
+    def detector(self, model_key):
+        if model_key not in self.models:
+            self.models[model_key] = PersonDetector(model_key)
+        return self.models[model_key]
+
+
+class Channels:
+    def __init__(self, capture, event_share, autostart=None):
+        inference = InferenceQueue()
+        self.primary = Monitor(capture, event_share, infer=inference)
+        self.lock = self.primary.lock
+        self.items = {1: self.primary}
+        self.items.update({channel: Monitor(capture, shared=self.primary, infer=inference) for channel in (2, 3)})
+        self.settings = DATA / "channels.json"
+        self.credentials = None
+        self.remember = False
+        self.done = threading.Event()
+        self.wake = threading.Event()
+        self.config = {}
+        for channel, monitor in self.items.items():
+            monitor.channel = channel
+            self.config[channel] = {"enabled": channel == autostart, "record": channel == autostart,
+                                    "detect": channel == autostart and str(channel) in monitor.regions
+                                    and MODELS[monitor.model_key].is_file()
+                                    and importlib.util.find_spec("onnxruntime") is not None,
+                                    "model": monitor.model_key}
+        if self.settings.exists():
+            saved = json.loads(self.settings.read_text(encoding="utf-8"))
+            self.config = self.validate(saved, startup=True)
+        if VAULT.is_file():
+            self.credentials = self.read_credentials()
+        self.worker = threading.Thread(target=self.reconcile, name="seetong-channels", daemon=True)
+        self.worker.start()
+
+    @staticmethod
+    def read_credentials():
+        value = json.loads(read_secret(VAULT))
+        if (not isinstance(value, list) or len(value) != 2
+                or not all(isinstance(item, str) and item for item in value)):
+            raise ValueError("无法读取已记住的账号，请重新保存账号")
+        return tuple(value)
+
+    def validate(self, raw, *, startup=False):
+        if not isinstance(raw, dict) or set(raw) != {"1", "2", "3"}:
+            raise ValueError("请提交第 1、2、3 路的完整设置")
+        parsed = {}
+        for channel, monitor in self.items.items():
+            config = raw[str(channel)]
+            if not isinstance(config, dict) or any(type(config.get(key)) is not bool for key in
+                                                  ("enabled", "detect", "record")):
+                raise ValueError("通道开关无效")
+            model = config.get("model")
+            if not isinstance(model, str) or model not in MODELS:
+                raise ValueError("未知的人体检测模型")
+            if startup and not MODELS[model].is_file():
+                model = monitor.model_key
+            detect = config["enabled"] and config["detect"]
+            if detect and (
+                    str(channel) not in monitor.regions or not MODELS[model].is_file()
+                    or importlib.util.find_spec("onnxruntime") is None):
+                if startup:
+                    detect = False
+                else:
+                    raise ValueError(f"第 {channel} 路需要先保存检测区域并安装所选模型")
+            parsed[channel] = dict(enabled=config["enabled"], detect=detect,
+                                   record=config["enabled"] and config["record"], model=model)
+        return parsed
+
+    def apply(self, raw, data=None):
+        parsed = self.validate(raw)
+        credentials, remember = self.credentials, self.remember
+        if data is not None:
+            username, password = data.get("username"), data.get("password")
+            if username or password:
+                if not isinstance(username, str) or not username.strip() or not isinstance(password, str) or not password:
+                    raise ValueError("请输入完整的云平台账号和密码")
+                credentials = (username.strip(), password)
+                if self.credentials and credentials != self.credentials and any(
+                        m.worker and m.worker.is_alive() for m in self.items.values()):
+                    raise ValueError("更换云账号前请先停用所有通道")
+                remember = data.get("remember") is True
+        if not credentials and any(config["enabled"] for config in parsed.values()):
+            raise ValueError("请输入或保存云平台账号和密码")
+        atomic_write(self.settings, json.dumps(parsed).encode("utf-8"))
+        self.config, self.credentials, self.remember = parsed, credentials, remember
+        self.wake.set()
+
+    def update(self, channel, **changes):
+        raw = {str(key): dict(value) for key, value in self.config.items()}
+        raw[str(channel)].update(changes)
+        self.apply(raw)
+
+    def reconcile(self):
+        while not self.done.is_set():
+            with self.lock:
+                for channel, monitor in self.items.items():
+                    config = self.config[channel]
+                    running = monitor.worker and monitor.worker.is_alive()
+                    if running and (not config["enabled"] or monitor.recording != config["record"]):
+                        monitor.stop.set()
+                        monitor.message = "正在停止" if not config["enabled"] else "正在更新录像设置"
+                    elif running and not monitor.stop.is_set() and (
+                            monitor.detect != config["detect"] or monitor.model_key != config["model"]):
+                        monitor.detect, monitor.model_key = config["detect"], config["model"]
+                        monitor.revision += 1
+                    elif not running:
+                        monitor.model_key = config["model"]
+                        if config["enabled"] and self.credentials:
+                            monitor.start(self.credentials, channel, self.remember and not VAULT.exists(),
+                                          config["record"], config["detect"])
+            self.wake.wait(.25)
+            self.wake.clear()
+
+    def shutdown(self):
+        self.done.set()
+        self.wake.set()
+        self.worker.join(2)
+        for monitor in self.items.values():
+            monitor.stop.set()
+        deadline = time.monotonic() + 15
+        for monitor in self.items.values():
+            if monitor.worker:
+                monitor.worker.join(max(0, deadline-time.monotonic()))
+
+
+def channel_state(monitor):
+    running = bool(monitor.worker and monitor.worker.is_alive())
+    return dict(channel=monitor.channel, message=monitor.message, active=running, detect=monitor.detect,
+                count=monitor.count, sequence=monitor.sequence if monitor.frame else 0,
+                recording=monitor.recording, event_recording=monitor.event_recording,
+                detector_model=monitor.model_key, active_detector_model=monitor.active_model_key)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
+
+    def channel_monitor(self, channel=None):
+        manager = getattr(self.server, "channels", None)
+        if channel is None:
+            return self.server.monitor
+        if type(channel) is not int or channel not in (1, 2, 3):
+            raise ValueError("无效通道")
+        if manager:
+            return manager.items[channel]
+        if channel != self.server.monitor.channel:
+            raise ValueError("无效通道")
+        return self.server.monitor
 
     def reply(self, value, status=200, mime="application/json; charset=utf-8"):
         data = value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=False).encode("utf-8")
@@ -585,27 +771,30 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(self.recording_history())
         if route == "/api/event-cards":
             return self.reply(self.recording_history(events_only=True)[:12])
-        monitor = self.server.monitor
+        manager = getattr(self.server, "channels", None)
+        try:
+            requested_channel = parse_qs(url.query, keep_blank_values=True).get("channel")
+            monitor = self.channel_monitor(int(requested_channel[0]) if requested_channel else None)
+        except (ValueError, TypeError):
+            return self.reply({"error": "无效通道"}, 400)
         with monitor.lock:
             if route == "/api/state":
                 storage = monitor.storage.status()
                 return self.reply(dict(
-                    saved=VAULT.exists(), channel=monitor.channel, message=monitor.message,
-                    active=bool(monitor.worker and monitor.worker.is_alive()), detect=monitor.detect,
-                    count=monitor.count, sequence=monitor.sequence if monitor.frame else 0,
-                    recording=monitor.recording, recorded_bytes=sum(item["used"] for item in storage.values()),
+                    **channel_state(monitor), saved=VAULT.exists(), recorded_bytes=sum(item["used"] for item in storage.values()),
                     storage=storage,
-                    event_recording=monitor.event_recording,
                     alerts=monitor.alerts.status(),
                     event_share=monitor.event_share is not None,
                     regions=monitor.regions,
                     exclusion_regions=monitor.exclusion_regions,
-                    detector_model=monitor.model_key,
-                    active_detector_model=monitor.active_model_key,
                     detector_models={key: path.is_file() for key, path in MODELS.items()},
+                    channels=[dict(**channel_state(item), config=manager.config[channel])
+                              for channel, item in manager.items.items()] if manager else [],
+                    can_start=bool(manager.credentials) if manager else VAULT.exists(),
                 ))
-            if route == "/api/frame" and monitor.frame:
-                return self.reply(monitor.frame, mime="image/jpeg")
+            frame = monitor.frame if route == "/api/frame" else None
+        if frame:
+            return self.reply(frame, mime="image/jpeg")
         return self.reply({}, 404)
 
     def recording_history(self, events_only=False):
@@ -706,13 +895,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.headers.get("Origin") != "http://" + self.server.host or
                 self.headers.get("X-Seetong-Session") != self.server.token):
             return self.reply({}, 403)
-        monitor = self.server.monitor
+        manager = getattr(self.server, "channels", None)
         try:
             length = int(self.headers.get("Content-Length", 0))
             if not 0 < length <= 8192:
                 raise ValueError("请求大小无效")
             data = json.loads(self.rfile.read(length))
             route = self.path
+            if not isinstance(data, dict):
+                raise ValueError("请求无效")
+            monitor = self.channel_monitor(data.get("channel") if manager else None)
             if route == "/api/alerts/test":
                 link = None
                 if data.get("event") is True:
@@ -744,6 +936,8 @@ class Handler(BaseHTTPRequestHandler):
                             raise ValueError("请输入 0.01 到 10000 GB 的容量上限")
                         limits[kind] = round(amount * 1_000_000_000)
                     monitor.storage.set_limits(limits, lambda value: atomic_write(STORAGE_SETTINGS, json.dumps(value).encode("utf-8")))
+                elif route == "/api/channels" and manager:
+                    manager.apply(data.get("channels"), data)
                 elif route == "/api/start":
                     username, password = data.get("username"), data.get("password")
                     if not username and not password and VAULT.exists():
@@ -753,13 +947,25 @@ class Handler(BaseHTTPRequestHandler):
                     channel = data.get("channel")
                     if type(channel) is not int or channel not in (1, 2, 3):
                         raise ValueError("无效通道")
-                    monitor.start((username.strip(), password), channel,
-                                  data.get("remember") is True, data.get("record") is True)
+                    if manager:
+                        raw = {str(key): dict(value) for key, value in manager.config.items()}
+                        raw[str(channel)].update(enabled=True, record=data.get("record") is True)
+                        manager.apply(raw, data)
+                    else:
+                        monitor.start((username.strip(), password), channel,
+                                      data.get("remember") is True, data.get("record") is True)
                 elif route == "/api/forget":
                     VAULT.unlink(missing_ok=True)
+                    if manager:
+                        manager.remember = False
+                        if not any(config["enabled"] for config in manager.config.values()):
+                            manager.credentials = None
                 elif route == "/api/stop":
-                    monitor.stop.set()
-                    monitor.message = "正在停止"
+                    if manager:
+                        manager.update(monitor.channel, enabled=False)
+                    else:
+                        monitor.stop.set()
+                        monitor.message = "正在停止"
                 elif route in ("/api/region", "/api/exclusion-region"):
                     if not monitor.frame:
                         raise ValueError("请先打开实时画面")
@@ -779,11 +985,13 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             updated[channel] = points
                         atomic_write(monitor.exclusion_settings, json.dumps(updated).encode("utf-8"))
-                        monitor.exclusion_regions = updated
+                        monitor.exclusion_regions.clear()
+                        monitor.exclusion_regions.update(updated)
                     else:
                         updated = monitor.regions | {channel: points}
                         atomic_write(SETTINGS, json.dumps(updated).encode("utf-8"))
-                        monitor.regions = updated
+                        monitor.regions.clear()
+                        monitor.regions.update(updated)
                     monitor.revision += 1
                 elif route == "/api/detector-model":
                     selected = data.get("model")
@@ -791,7 +999,9 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("未知的人体检测模型")
                     if not MODELS[selected].is_file():
                         raise ValueError("本机尚未安装这个检测模型")
-                    if selected != monitor.model_key:
+                    if manager:
+                        manager.update(monitor.channel, model=selected)
+                    elif selected != monitor.model_key:
                         atomic_write(monitor.model_setting, selected.encode("utf-8"))
                         monitor.model_key = selected
                         monitor.revision += 1
@@ -803,8 +1013,11 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("本机缺少人体检测模型")
                     if enabled and importlib.util.find_spec("onnxruntime") is None:
                         raise ValueError("本机缺少 ONNX Runtime，请先安装检测依赖")
-                    monitor.detect = enabled
-                    monitor.revision += 1
+                    if manager:
+                        manager.update(monitor.channel, detect=enabled)
+                    else:
+                        monitor.detect = enabled
+                        monitor.revision += 1
                 else:
                     return self.reply({}, 404)
             self.reply({"ok": True, "alerts": monitor.alerts.status()} if route.startswith("/api/alerts/") else {"ok": True})
@@ -860,24 +1073,14 @@ def main():
             parser.error(str(error))
         except OSError:
             parser.error("无法读取或保存事件回看密钥")
-    monitor = Monitor(capture, share)
+    channels = Channels(capture, share, args.autostart)
     share_context = (ThreadingHTTPServer(("127.0.0.1", args.share_port), EventShareHandler)
                      if share else nullcontext())
     with share_context as share_server, ThreadingHTTPServer(("127.0.0.1", args.port), Handler) as server:
         server.host = f"127.0.0.1:{server.server_port}"
         server.token = secrets.token_hex(32)
-        server.monitor = monitor
-        if args.autostart and VAULT.is_file():
-            try:
-                credentials = json.loads(read_secret(VAULT))
-                if (not isinstance(credentials, list) or len(credentials) != 2 or
-                        not all(isinstance(value, str) and value for value in credentials)):
-                    raise ValueError
-            except (OSError, ValueError):
-                parser.error("无法读取已记住的账号，请重新保存账号")
-            detect = (str(args.autostart) in monitor.regions and MODELS[monitor.model_key].is_file()
-                      and importlib.util.find_spec("onnxruntime") is not None)
-            monitor.start(credentials, args.autostart, remember=False, record=True, detect=detect)
+        server.channels = channels
+        server.monitor = channels.primary
         url = "http://" + server.host
         print(url, flush=True)
         if not args.no_browser and os.name == "nt":
@@ -894,10 +1097,9 @@ def main():
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            monitor.stop.set()
-            if monitor.worker:
-                monitor.worker.join(15)
+            pass
         finally:
+            channels.shutdown()
             if share_server:
                 share_server.shutdown()
 

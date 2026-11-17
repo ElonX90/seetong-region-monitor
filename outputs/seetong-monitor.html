@@ -65,9 +65,17 @@ canvas[data-editing="true"] { touch-action: none; cursor: crosshair; }
 .control-panel { gap: 14px; }
 .control-panel section, .control-panel form { display: grid; gap: 11px; }
 .control-panel section { border-top: 1px solid var(--line); padding-top: 13px; }
+.channel-plan { display: grid; gap: 6px; }
+.channel-plan > div { display: grid; align-items: center; grid-template-columns: 1fr repeat(3, 42px); gap: 6px; }
+.channel-plan input { width: 17px; min-height: 17px; justify-self: center; accent-color: var(--mint); }
+.channel-plan .plan-header small:not(:first-child) { text-align: center; }
+.camera-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1px; background: #303c49; }
+.camera-tile { padding: 0; border: 0; border-radius: 0; overflow: hidden; text-align: start; min-width: 0; background: #10161d; }
+.camera-tile canvas { cursor: zoom-in; }
+.camera-tile span { display: flex; gap: 6px; flex-wrap: wrap; justify-content: space-between; padding: 8px 10px; }
+@media(max-width: 525px) { .camera-grid { grid-template-columns: 1fr; } }
 .action-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
 .action-grid button { padding-inline: 8px; }
-#detect { width: 100%; }
 .error { color: #ffb2aa; font-size: .86rem; line-height: 1.5; }
 .error:empty, .empty-hide:empty { display: none; }
 .snapshots { margin-top: 16px; }
@@ -147,7 +155,8 @@ dialog .toolbar { padding: 0 0 12px; }
   </section>
   <div class="grid">
     <section class="panel preview">
-      <div class="toolbar"><h2 id="videoTitle">实时画面</h2><button id="editRegion" type="button" aria-expanded="false" aria-controls="areaTools" disabled>编辑区域</button></div>
+      <div class="toolbar"><h2 id="videoTitle">实时画面</h2><div class="actions"><button id="showAllCameras" type="button" hidden>同屏预览</button><button id="editRegion" type="button" aria-expanded="false" aria-controls="areaTools" disabled>编辑区域</button></div></div>
+      <div class="camera-grid" id="cameraGrid" hidden aria-label="通道预览"></div>
       <canvas id="screen" width="640" height="360" aria-label="直播画面和检测区域"></canvas>
       <div class="area-tools" id="areaTools" hidden>
         <div class="actions" id="areaModes">
@@ -168,13 +177,15 @@ dialog .toolbar { padding: 0 0 12px; }
     <aside class="panel controls control-panel" aria-label="监控操作">
       <h2>监控操作</h2>
       <form id="login" class="controls">
-        <label>通道<select id="channel"><option value="1">第 1 路</option><option value="2">第 2 路</option><option value="3">第 3 路</option></select></label>
-        <div class="action-grid"><button class="primary" id="start">打开预览</button><button type="button" id="stop">停止连接</button></div>
+        <div class="channel-plan" id="channelPlan" aria-label="通道开关">
+          <div class="plan-header"><small>通道</small><small>启用</small><small>检测</small><small>录像</small></div>
+        </div>
+        <button class="primary" id="start" disabled>应用通道设置</button>
+        <small id="planHint">检测需要先为对应通道画区。录像开关控制连续录像。</small>
         <small class="empty-hide" id="recordStatus"></small>
       </form>
-      <section aria-labelledby="detectHeading">
-        <h3 id="detectHeading">人体检测</h3>
-        <button id="detect" type="button">启动检测</button>
+      <section aria-labelledby="modelHeading">
+        <h3 id="modelHeading">人体检测模型</h3>
         <div class="action-grid" role="group" aria-label="人体检测模型">
           <button type="button" id="modelNano" aria-pressed="false" disabled>Nano · 省 CPU</button>
           <button type="button" id="modelOriginal" aria-pressed="false" disabled>原模型</button>
@@ -203,9 +214,8 @@ dialog .toolbar { padding: 0 0 12px; }
       <label>云平台账号<input id="username" form="login" autocomplete="username" maxlength="200"></label>
       <label>密码<input id="password" form="login" type="password" autocomplete="current-password" maxlength="300"></label>
       <label class="check"><input id="remember" form="login" type="checkbox" checked>在本机记住账号和密码</label>
-      <label class="check"><input id="record" form="login" type="checkbox" checked>同时保存连续录像</label>
       <small id="saved"></small>
-      <div class="actions"><button id="applyConnection" type="button">打开预览</button><button id="forget" type="button">清除已记住的账号</button></div>
+      <div class="actions"><button id="applyConnection" type="button">应用通道设置</button><button id="forget" type="button">清除已记住的账号</button></div>
       <p class="error" id="connectionError" role="alert"></p>
     </div>
   </section>
@@ -242,6 +252,7 @@ dialog .toolbar { padding: 0 0 12px; }
   <div class="history-filters">
     <label>录像类型<select id="historyType"><option value="">全部类型</option><option value="continuous">连续录像</option><option value="event">事件录像</option></select></label>
     <label>日期<input id="historyDate" type="date"></label>
+    <label>通道<select id="historyChannel"><option value="">所有通道</option><option value="1">第 1 路</option><option value="2">第 2 路</option><option value="3">第 3 路</option></select></label>
     <button id="refreshHistory" type="button">刷新列表</button>
   </div>
   <ul class="event-list history-list" id="historyList" aria-live="polite"></ul>
@@ -262,13 +273,18 @@ const session = '__SESSION_TOKEN__';
 const byId = id => document.getElementById(id);
 const screen = byId('screen'), ctx = screen.getContext('2d');
 let state = {}, bitmap, drag, previewRegion, lastSequence = 0;
-let channelInitialized = false;
 let previousEvents;
 let previousDevices;
 let alertBusy = false;
 let historyEntries = [];
 let storageLoaded = false, storageBusy = false;
 let starting = false;
+let focusedChannel = 1, focusGeneration = 0, viewMode = 'auto';
+let channelPlan = {};
+const planEdits = new Map();
+const planRows = new Map();
+const cameraTiles = new Map();
+let lastTileRefresh = 0;
 async function request(path, data) {
   const headers = {'X-Seetong-Session':session};
   const options = {headers, cache:'no-store', signal:AbortSignal.timeout(data === undefined ? 8000 : 30000)};
@@ -435,11 +451,128 @@ async function action(fn, errorId = 'error') {
   byId(errorId).textContent = '';
   try { await fn(); } catch(error) { byId(errorId).textContent = error.message; }
 }
+function focusOn(channel, mode = 'single') {
+  if (focusedChannel !== channel) {
+    focusedChannel = channel;
+    focusGeneration++;
+    bitmap?.close(); bitmap = null; lastSequence = 0;
+    if (areaMode) setAreaMode(null);
+    showAreaControls();
+    for (const button of Object.values(modelButtons)) button.disabled = true;
+  }
+  viewMode = mode;
+  draw();
+}
+byId('showAllCameras').onclick = () => {
+  if (areaMode) setAreaMode(null);
+  viewMode = 'grid';
+};
+for (const channel of [1, 2, 3]) {
+  const row = document.createElement('div'), focus = document.createElement('button');
+  focus.type = 'button';
+  focus.textContent = `第 ${channel} 路`;
+  focus.onclick = () => focusOn(channel);
+  row.append(focus);
+  const fields = {};
+  for (const [key, label] of [['enabled','启用'], ['detect','人体检测'], ['record','连续录像']]) {
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.setAttribute('aria-label', `第 ${channel} 路${label}`);
+    input.onchange = () => {
+      setPlanEdit(channel, key, input.checked);
+      if (key === 'enabled' && !input.checked) {
+        setPlanEdit(channel, 'detect', false);
+        setPlanEdit(channel, 'record', false);
+      }
+      showChannelPlan();
+    };
+    fields[key] = input;
+    row.append(input);
+  }
+  planRows.set(channel, {focus, fields});
+  byId('channelPlan').append(row);
+}
+function setPlanEdit(channel, key, value) {
+  const editKey = `${channel}:${key}`;
+  if (value === channelPlan[channel]?.[key]) planEdits.delete(editKey);
+  else planEdits.set(editKey, value);
+}
+function showChannelPlan() {
+  for (const [channel, {focus, fields}] of planRows) {
+    focus.setAttribute('aria-pressed', String(focusedChannel === channel));
+    const enabled = planEdits.get(`${channel}:enabled`) ?? channelPlan[channel]?.enabled ?? false;
+    for (const [key, input] of Object.entries(fields)) {
+      input.checked = (key === 'enabled' || enabled) &&
+        (planEdits.get(`${channel}:${key}`) ?? channelPlan[channel]?.[key] ?? false);
+      input.disabled = starting || !channelPlan[channel] || (key !== 'enabled' && !enabled)
+        || (key === 'detect' && !state.regions?.[channel]);
+      input.title = key !== 'enabled' && !enabled ? '请先启用该通道'
+        : key === 'detect' && !state.regions?.[channel] ? '先打开该路预览并保存检测区域' : '';
+    }
+  }
+  const ready = Object.keys(channelPlan).length === 3;
+  byId('start').disabled = starting || !ready || (!planEdits.size && state.can_start);
+  byId('applyConnection').disabled = starting || !ready;
+}
+async function showCameras(channels, grid) {
+  byId('cameraGrid').hidden = !grid;
+  screen.hidden = grid;
+  byId('editRegion').hidden = grid;
+  byId('showAllCameras').hidden = grid || channels.length < 2;
+  if (!grid) return;
+  for (const [channel, entry] of cameraTiles) {
+    if (channels.some(item => item.channel === channel)) continue;
+    entry.tile.remove();
+    cameraTiles.delete(channel);
+  }
+  const refresh = performance.now() - lastTileRefresh >= 650;
+  if (refresh) lastTileRefresh = performance.now();
+  await Promise.allSettled(channels.map(async item => {
+    const channel = item.channel;
+    let entry = cameraTiles.get(channel);
+    if (!entry) {
+      const tile = document.createElement('button'), canvas = document.createElement('canvas');
+      const label = document.createElement('span'), name = document.createElement('strong'), meta = document.createElement('small');
+      tile.type = 'button'; tile.className = 'camera-tile';
+      tile.setAttribute('aria-label', `放大第 ${channel} 路`);
+      tile.onclick = () => focusOn(channel);
+      canvas.width = 400; canvas.height = 225;
+      name.textContent = `第 ${channel} 路`;
+      label.append(name, meta);
+      tile.append(canvas, label);
+      const next = channels.find(other => other.channel > channel && cameraTiles.has(other.channel));
+      byId('cameraGrid').insertBefore(tile, next ? cameraTiles.get(next.channel).tile : null);
+      entry = {tile, canvas, meta, sequence:0};
+      cameraTiles.set(channel, entry);
+    }
+    entry.meta.textContent = item.sequence
+      ? `${item.count == null ? '预览中' : item.count + ' 人'}${item.event_recording ? ' · 事件录制中' : item.recording ? ' · 录像中' : ''}`
+      : item.message;
+    const ctx = entry.canvas.getContext('2d');
+    if (!item.sequence) {
+      ctx.clearRect(0,0,400,225); entry.sequence = 0;
+    } else if (refresh && item.sequence !== entry.sequence) {
+      const picture = await createImageBitmap(await (await request(`/api/frame?channel=${channel}`)).blob());
+      ctx.drawImage(picture,0,0,400,225);
+      picture.close();
+      entry.sequence = item.sequence;
+    }
+  }));
+}
 byId('login').onsubmit = event => {
   event.preventDefault();
-  if (starting || state.active) return;
+  if (starting || Object.keys(channelPlan).length !== 3) return;
+  const channels = Object.fromEntries(Object.entries(channelPlan).map(([id,config]) => [id,{...config}]));
+  for (const [key,value] of planEdits) {
+    const [channel,field] = key.split(':');
+    channels[channel][field] = value;
+  }
+  for (const config of Object.values(channels)) {
+    if (!config.enabled) config.detect = config.record = false;
+  }
   const settings = byId('settingsViewer');
-  if (!state.saved && (!byId('username').value.trim() || !byId('password').value)) {
+  if (Object.values(channels).some(item => item.enabled) && !state.can_start &&
+      (!byId('username').value.trim() || !byId('password').value)) {
     if (!settings.open) settings.showModal();
     byId('connectionError').textContent = '请输入云平台账号和密码。';
     (byId('username').value.trim() ? byId('password') : byId('username')).focus();
@@ -447,34 +580,35 @@ byId('login').onsubmit = event => {
   }
   action(async () => {
     starting = true;
-    byId('start').disabled = byId('applyConnection').disabled = true;
+    showChannelPlan();
     try {
-      await request('/api/start',{
+      await request('/api/channels',{
         username:byId('username').value,password:byId('password').value,
-        remember:byId('remember').checked,channel:Number(byId('channel').value),
-        record:byId('record').checked
+        remember:byId('remember').checked, channels
       });
+      channelPlan = channels;
+      planEdits.clear();
+      if (areaMode) setAreaMode(null);
+      viewMode = 'auto';
       byId('username').value = '';
       byId('password').value = '';
       if (settings.open) settings.close();
     } finally {
       starting = false;
-      byId('start').disabled = byId('applyConnection').disabled = !!state.active;
+      showChannelPlan();
     }
   }, settings.open ? 'connectionError' : 'error');
 };
 byId('openSettings').onclick = () => byId('settingsViewer').showModal();
 byId('closeSettings').onclick = () => byId('settingsViewer').close();
 byId('applyConnection').onclick = () => byId('login').requestSubmit();
-byId('stop').onclick = () => action(() => request('/api/stop',{}));
 byId('forget').onclick = () => action(() => request('/api/forget',{}), 'connectionError');
-byId('detect').onclick = () => action(() => request('/api/detect',{enabled:!state.detect}));
 const modelButtons = {nano: byId('modelNano'), original: byId('modelOriginal')};
 let savingModel = false;
 function showDetectorModel() {
   const selected = state.detector_model;
   for (const [key, button] of Object.entries(modelButtons)) {
-    button.disabled = savingModel || !state.detector_models?.[key];
+    button.disabled = savingModel || state.channel !== focusedChannel || !state.detector_models?.[key];
     button.setAttribute('aria-pressed', String(selected === key));
     button.title = state.detector_models?.[key] ? '' : '尚未安装此模型';
   }
@@ -489,8 +623,9 @@ for (const [key, button] of Object.entries(modelButtons)) {
     savingModel = true;
     showDetectorModel();
     try {
-      await request('/api/detector-model', {model: key});
-      state.detector_model = key;
+      const channel = focusedChannel;
+      await request('/api/detector-model', {channel, model: key});
+      if (focusedChannel === channel) state.detector_model = key;
     } finally {
       savingModel = false;
       showDetectorModel();
@@ -695,10 +830,11 @@ function eventCard(entry) {
   return card;
 }
 function showHistory() {
-  const type = byId('historyType').value, day = byId('historyDate').value;
+  const type = byId('historyType').value, day = byId('historyDate').value, channel = byId('historyChannel').value;
   const list = byId('historyList');
   const entries = historyEntries.filter(entry => {
     if (type && entry.type !== type) return false;
+    if (channel && String(entry.channel) !== channel) return false;
     if (!day) return true;
     const date = new Date(entry.time);
     const localDay = [date.getFullYear(), date.getMonth() + 1, date.getDate()].map(value => String(value).padStart(2, '0')).join('-');
@@ -720,6 +856,7 @@ async function loadHistory() {
 function openHistory(type) {
   byId('historyType').value = type;
   byId('historyDate').value = '';
+  byId('historyChannel').value = '';
   showListMessage(byId('historyList'), '正在读取录像…');
   byId('historyViewer').showModal();
   loadHistory();
@@ -730,6 +867,7 @@ byId('closeHistory').onclick = () => byId('historyViewer').close();
 byId('refreshHistory').onclick = loadHistory;
 byId('historyType').onchange = showHistory;
 byId('historyDate').onchange = showHistory;
+byId('historyChannel').onchange = showHistory;
 async function updateEvents() {
   try {
     const events = await (await request('/api/event-cards')).json();
@@ -748,37 +886,45 @@ async function updateEvents() {
 }
 async function poll() {
   try {
-    state = await (await request('/api/state')).json();
+    const shared = await (await request('/api/state')).json();
+    const channels = shared.channels || [];
+    channelPlan = Object.fromEntries(channels.map(item => [item.channel,item.config]));
+    const enabled = channels.filter(item => item.config.enabled || item.active);
+    if (viewMode === 'auto' && enabled.length && !enabled.some(item => item.channel === focusedChannel)) {
+      focusOn(enabled[0].channel, 'auto');
+    }
+    const grid = enabled.length > 1 && viewMode !== 'single';
+    state = {...shared, ...(channels.find(item => item.channel === focusedChannel) || {})};
     if (!savingPolygon && areaMode && (state.channel !== polygonChannel || !state.active)) setAreaMode(null);
     showAlertState();
     showStorage();
     showDetectorModel();
-    byId('status').textContent = state.message;
-    byId('connectionLight').dataset.live = String(!!state.active && !!state.sequence);
-    byId('videoTitle').textContent = state.active ? `第 ${state.channel} 路实时画面` : '实时画面';
-    byId('count').textContent = state.count == null ? '—' : `${state.count} 人`;
-    byId('recordIndicator').textContent = state.event_recording ? '事件录制中' : state.recording ? '连续录像中' : '待机';
+    byId('status').textContent = grid ? `${enabled.filter(item => item.sequence).length} / ${enabled.length} 路在线` : state.message;
+    byId('connectionLight').dataset.live = String(grid ? enabled.some(item => item.sequence) : !!state.active && !!state.sequence);
+    byId('videoTitle').textContent = grid ? '同屏预览' : `第 ${focusedChannel} 路实时画面`;
+    const counts = grid ? enabled.map(item => item.count).filter(value => value != null) : state.count == null ? [] : [state.count];
+    byId('count').textContent = counts.length ? `${counts.reduce((total,value) => total + value,0)} 人` : '—';
+    byId('recordIndicator').textContent = enabled.some(item => item.event_recording) ? '事件录制中'
+      : enabled.some(item => item.recording && item.sequence) ? '连续录像中' : '待机';
     const devices = state.alerts?.devices?.length;
     byId('deviceIndicator').textContent = devices == null ? '—' : devices ? `已绑定 ${devices} 台` : '未绑定';
     byId('saved').textContent = state.saved ? '已记住。账号和密码留空即可使用。' : '尚未保存账号';
-    byId('start').disabled = starting || state.active;
-    byId('applyConnection').disabled = starting || state.active;
-    byId('channel').disabled = state.active;
-    byId('record').disabled = state.active;
+    showChannelPlan();
     const ordinary = state.storage?.continuous;
-    byId('recordStatus').textContent = state.recording && ordinary
+    byId('recordStatus').textContent = ordinary
       ? `普通录像 · 已用 ${(ordinary.used / 1e6).toFixed(1)} MB / ${ordinary.limit / 1e9} GB` : '';
-    byId('eventStatus').textContent = state.event_recording ? '正在保存当前事件' : '';
-    byId('stop').disabled = !state.active;
-    byId('forget').disabled = !state.saved || state.active;
-    byId('detect').disabled = !state.sequence || !state.regions[state.channel];
-    byId('detect').textContent = state.detect ? '暂停检测' : '启动检测';
-    if (!channelInitialized || state.active) {
-      byId('channel').value = String(state.channel); channelInitialized = true;
-    }
-    if (state.sequence !== lastSequence) {
-      const next = state.sequence ? await createImageBitmap(await (await request('/api/frame')).blob()) : null;
-      bitmap?.close(); bitmap = next; lastSequence = state.sequence;
+    byId('eventStatus').textContent = enabled.some(item => item.event_recording) ? '正在保存区域事件' : '';
+    byId('forget').disabled = !state.saved || enabled.some(item => item.active);
+    byId('modelHeading').textContent = `第 ${focusedChannel} 路检测模型`;
+    await showCameras(enabled, grid);
+    if (!grid && state.sequence !== lastSequence) {
+      const generation = focusGeneration, sequence = state.sequence;
+      const next = sequence ? await createImageBitmap(await (await request(`/api/frame?channel=${state.channel}`)).blob()) : null;
+      if (generation === focusGeneration) {
+        bitmap?.close(); bitmap = next; lastSequence = sequence;
+      } else {
+        next?.close();
+      }
     }
     showAreaControls();
     draw();
