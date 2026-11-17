@@ -5,65 +5,212 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Seetong 区域监控</title>
 <style>
-:root{color-scheme:dark;font-family:Inter,"Microsoft YaHei UI",sans-serif;background:#101518;color:#eff5f2;--mint:#69e5ab;--line:#303e41}
-*{box-sizing:border-box}body{margin:0}main{max-width:1260px;margin:auto;padding:36px 26px 60px}header{display:flex;gap:20px;align-items:center;justify-content:space-between;margin-bottom:24px}h1,h2,p{margin:0}h1{font-size:clamp(1.5rem,3vw,2.4rem);letter-spacing:-.05em}h2{font-size:1.05rem}
-.status,small{color:#aac3b9}.status{padding:8px 12px;border:1px solid var(--line);border-radius:20px;font-size:.86rem}.grid{display:grid;grid-template-columns:minmax(0,1fr) 305px;gap:18px}.panel{border:1px solid var(--line);border-radius:14px;background:#192124;padding:17px}.preview{padding:0;overflow:hidden}.toolbar{display:flex;align-items:center;justify-content:space-between;padding:14px 17px;gap:10px}.count{color:var(--mint);font-variant-numeric:tabular-nums}
-canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-action:none;cursor:crosshair}.help{color:#a9bcb7;font-size:.85rem;padding:13px 17px;line-height:1.65}.controls{display:grid;align-content:start;gap:12px}label{display:grid;gap:6px;font-size:.88rem;color:#c5d7d1}input,select,button{font:inherit;border:1px solid var(--line);border-radius:8px;padding:9px 11px}input,select{min-width:0;background:#10181b;color:inherit}button{cursor:pointer;background:#263236;color:inherit}button.primary{background:var(--mint);border-color:var(--mint);color:#0a2318;font-weight:700}button:disabled{opacity:.4;cursor:default}.check{display:flex;align-items:center;gap:8px}.check input{accent-color:var(--mint)}.actions{display:flex;gap:8px;flex-wrap:wrap}.actions button{flex:1}.error{color:#ffada4;font-size:.85rem;line-height:1.5}.snapshots{margin-top:18px}.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:12px}.shot{padding:0;overflow:hidden;text-align:left}.shot img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#091013}.shot span{display:block;padding:8px;font-size:.76rem;color:#c5d7d1}dialog{max-width:min(92vw,1000px);border:1px solid var(--line);background:#192124;border-radius:12px;color:inherit}dialog img{display:block;max-width:100%;margin-top:12px}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
-@media(max-width:780px){main{padding:20px 12px}.grid{grid-template-columns:1fr}.controls{grid-row:1}header{align-items:flex-start}}
-.event-list{display:grid;gap:8px;margin:12px 0 0;padding:0;list-style:none}.event-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.event-row span{flex:1;min-width:210px}.event-row a{color:var(--mint);padding:8px}dialog video{display:block;width:min(82vw,880px);max-height:72vh;margin-top:12px;background:#091013}
-.alerts summary{cursor:pointer;font-weight:600}.alerts form{max-width:480px;margin-top:12px}.alerts a{color:var(--mint)}
-.local-file-notice{max-width:620px}.local-file-notice p{margin-top:12px;line-height:1.6}.local-file-notice a{color:var(--mint)}
-.header-actions,.history-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.history-filters{padding-bottom:12px}.history-filters label{flex:1;min-width:120px}.recording-text{display:grid;gap:4px}.device-list{max-width:600px}.device-list strong{overflow-wrap:anywhere}
-.history-dialog{width:min(92vw,740px);max-height:85vh;max-height:85dvh}
-.history-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
-.history-dialog .toolbar{padding:0 0 14px}
-.history-dialog .toolbar,.history-dialog .history-filters{flex-shrink:0}
-.history-list{margin:0;min-height:0;overflow:auto;overscroll-behavior:contain}
-.event-cards{display:grid;gap:14px;margin:14px 0 0;padding:0;list-style:none}.event-card{display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:16px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#152023}.event-card .shot{width:100%;align-self:start}.event-thumb-empty{display:grid;place-items:center;aspect-ratio:16/9;background:#10181b;border-radius:8px}.event-body{display:grid;align-content:start;gap:8px}.event-body .actions{align-items:center}.event-body .actions button{flex:none}.event-body a{color:var(--mint);padding:8px}.event-timeline{display:grid;gap:5px;padding:0;list-style:none}.event-change{padding:4px 0;border:0;background:transparent;color:#c5d7d1;text-align:left}.event-change:hover{text-decoration:underline}.event-change time{color:var(--mint);margin-right:8px;font-variant-numeric:tabular-nums}.storage-form{max-width:640px;display:grid;gap:12px;margin-top:14px}.storage-limits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.storage-form button{justify-self:start}.history-list .event-card{grid-template-columns:minmax(120px,180px) minmax(0,1fr)}
-@media(max-width:520px){.event-card,.history-list .event-card,.storage-limits{grid-template-columns:1fr}}
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  background: #101419;
+  color: #eef2f6;
+  --surface: #171d24;
+  --field: #10161d;
+  --line: #303c49;
+  --muted: #aebbc8;
+  --mint: #8de4b4;
+  --amber: #ffbd81;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+main { max-width: 1440px; margin: auto; padding: 28px clamp(16px, 3vw, 44px) 56px; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: clamp(1.4rem, 2.5vw, 1.85rem); font-weight: 650; }
+h2 { font-size: 1.05rem; font-weight: 650; }
+h3 { font-size: .92rem; font-weight: 650; }
+small { color: var(--muted); font-size: .82rem; line-height: 1.55; }
+a { color: var(--mint); }
+button, input, select { font: inherit; font-size: .9rem; min-height: 40px; border: 1px solid var(--line); border-radius: 7px; }
+button { padding: 8px 13px; color: inherit; background: #222b36; cursor: pointer; }
+button:not(:disabled):hover { background: #2b3946; border-color: #53677a; }
+button.primary:not(:disabled) { color: #10291c; background: var(--mint); border-color: var(--mint); font-weight: 700; }
+button.primary:not(:disabled):hover { background: #aeefcb; }
+button[aria-pressed="true"] { color: var(--mint); border-color: #629d7b; background: #20362e; }
+button:disabled { color: #8391a0; opacity: .76; cursor: default; }
+:focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
+input, select { width: 100%; min-width: 0; background: var(--field); color: inherit; padding: 8px 11px; }
+label { display: grid; gap: 6px; color: #d0dae4; font-size: .88rem; }
+.check { display: flex; align-items: center; gap: 8px; }
+.check input { width: 16px; min-height: 16px; accent-color: var(--mint); }
+.masthead { display: flex; gap: 16px; justify-content: space-between; align-items: center; margin-bottom: 19px; }
+.brand { display: flex; align-items: center; gap: 11px; }
+.brand-mark { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; background: #21372f; border-radius: 8px; color: var(--mint); font-size: 1rem; font-weight: 750; }
+.header-actions, .actions, .history-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.statusbar { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 16px; }
+.statuscell { display: grid; gap: 3px; padding: 10px 15px; min-width: 0; }
+.statuscell + .statuscell { border-inline-start: 1px solid var(--line); }
+.statuscell strong { font-size: .91rem; line-height: 1.5; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.status-light { display: inline-block; width: 7px; height: 7px; background: var(--amber); border-radius: 50%; margin-right: 7px; vertical-align: .08em; }
+.status-light[data-live="true"] { background: var(--mint); }
+.grid { display: grid; grid-template-columns: minmax(0,1fr) 308px; gap: 16px; align-items: start; }
+.panel, dialog { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: inherit; }
+.panel { padding: 16px; }
+.preview { padding: 0; overflow: hidden; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; flex-wrap: wrap; }
+.preview .toolbar h2 { display: flex; gap: 8px; align-items: center; }
+canvas { display: block; width: 100%; height: auto; aspect-ratio: 16/9; background: #080c11; }
+canvas[data-editing="true"] { touch-action: none; cursor: crosshair; }
+.area-tools { padding: 12px 14px; border-top: 1px solid var(--line); background: #1b242e; }
+.area-tools p { margin-top: 8px; color: var(--muted); font-size: .85rem; line-height: 1.55; }
+.area-tools .error { color: #ffb2aa; }
+.area-tools button { min-height: 42px; }
+.controls { display: grid; align-content: start; gap: 12px; min-width: 0; }
+.control-panel { gap: 14px; }
+.control-panel section, .control-panel form { display: grid; gap: 11px; }
+.control-panel section { border-top: 1px solid var(--line); padding-top: 13px; }
+.action-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.action-grid button { padding-inline: 8px; }
+#detect { width: 100%; }
+.error { color: #ffb2aa; font-size: .86rem; line-height: 1.5; }
+.error:empty, .empty-hide:empty { display: none; }
+.snapshots { margin-top: 16px; }
+.events-heading { padding: 0 0 12px; }
+.event-list, .event-cards { display: grid; gap: 0; list-style: none; padding: 0; margin: 0; }
+.event-row, .event-card { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+.event-row { flex-wrap: wrap; }
+.event-row .recording-text { flex: 1 1 10rem; }
+.event-row a, .event-body a { padding: 6px; font-size: .88rem; }
+.recording-text { display: grid; gap: 4px; }
+.shot, .event-thumb-empty { width: 106px; aspect-ratio: 16/9; flex: 0 0 auto; border-radius: 6px; overflow: hidden; padding: 0; background: var(--field); }
+.shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.event-thumb-empty { display: grid; place-items: center; }
+.event-body { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 4px 14px; flex: 1; min-width: 0; }
+.event-body .actions { grid-column: 2; grid-row: 1 / span 2; justify-content: flex-end; }
+.event-body strong { font-size: .92rem; }
+.event-body details { grid-column: 1 / -1; }
+.event-timeline { display: grid; gap: 4px; padding: 4px 0 0; list-style: none; }
+.event-change { text-align: start; color: var(--muted); padding: 4px 0; min-height: 32px; border: 0; background: transparent; }
+.event-change time { color: var(--mint); margin-right: 8px; }
+dialog { max-width: min(94vw, 1000px); max-height: 88dvh; padding: 16px; }
+dialog::backdrop { background: #080b10c9; }
+dialog img { display: block; max-width: 100%; margin-top: 12px; }
+dialog video { display: block; width: min(84vw,880px); max-height: 68dvh; margin-top: 8px; background: #080c11; }
+dialog .toolbar { padding: 0 0 12px; }
+.history-dialog, .settings-dialog { width: min(94vw,740px); }
+.history-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.history-filters { padding-bottom: 12px; align-items: end; }
+.history-filters label { flex: 1 1 120px; }
+.history-list { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.settings-dialog > section + section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.settings-dialog form, .settings-dialog details { margin-top: 10px; }
+.settings-fields { margin-top: 10px; }
+.settings-dialog summary, .event-body summary { color: var(--muted); cursor: pointer; font-size: .83rem; }
+.settings-dialog details[open] summary { margin-bottom: 6px; }
+.storage-form { display: grid; gap: 10px; }
+.storage-limits { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.storage-form button { justify-self: start; }
+.device-list strong { overflow-wrap: anywhere; }
+.local-file-notice { max-width: 620px; }
+.local-file-notice p { margin-top: 12px; }
+@media (max-width: 800px) {
+  main { padding-top: 16px; }
+  .grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 525px) {
+  main { padding-inline: 10px; }
+  .masthead { align-items: flex-start; gap: 8px; }
+  .header-actions { gap: 5px; }
+  .masthead button { padding-inline: 8px; }
+  .brand { gap: 7px; }
+  .brand-mark { display: none; }
+  h1 { font-size: 1.35rem; }
+  .statusbar { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .statuscell { padding: 8px 10px; }
+  .statuscell:nth-child(3) { border-inline-start: 0; }
+  .statuscell:nth-child(n+3) { border-top: 1px solid var(--line); }
+  button { min-height: 44px; }
+  .shot, .event-thumb-empty { width: 82px; }
+  .event-body { grid-template-columns: 1fr; }
+  .event-body .actions { grid-column: 1; grid-row: auto; justify-content: flex-start; }
+  .storage-limits { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
 <main>
-  <header><h1>Seetong 区域监控</h1><div class="header-actions"><button id="openHistory" type="button">历史录像</button><span class="status" id="status" role="status">连接本机服务…</span></div></header>
+  <header class="masthead">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">S</span><h1>Seetong 区域监控</h1></div>
+    <div class="header-actions"><button id="openHistory" type="button">历史录像</button><button id="openSettings" type="button">设置</button></div>
+  </header>
+  <section class="statusbar" aria-label="监控状态">
+    <div class="statuscell"><small>连接</small><strong><span class="status-light" id="connectionLight" aria-hidden="true"></span><span id="status">连接本机服务…</span></strong></div>
+    <div class="statuscell"><small>区域人数</small><strong id="count">—</strong></div>
+    <div class="statuscell"><small>录像</small><strong id="recordIndicator">—</strong></div>
+    <div class="statuscell"><small>手机提醒</small><strong id="deviceIndicator">—</strong></div>
+  </section>
   <div class="grid">
     <section class="panel preview">
-      <div class="toolbar"><h2 id="videoTitle">实时画面</h2><strong class="count" id="count">区域人数 —</strong></div>
+      <div class="toolbar"><h2 id="videoTitle">实时画面</h2><button id="editRegion" type="button" aria-expanded="false" aria-controls="areaTools" disabled>编辑区域</button></div>
       <canvas id="screen" width="640" height="360" aria-label="直播画面和检测区域"></canvas>
-      <div class="help">
-        <button id="startPolygon" type="button" disabled>绘制多边形</button>
-        <span id="polygonActions" hidden>
+      <div class="area-tools" id="areaTools" hidden>
+        <div class="actions" id="areaModes">
+          <button id="startRectangle" type="button" aria-pressed="true">矩形</button>
+          <button id="startPolygon" type="button" aria-pressed="false">多边形</button>
+          <button id="startExclusion" type="button" aria-pressed="false">忽略区</button>
+          <button id="clearExclusion" type="button" hidden>移除忽略区</button>
+        </div>
+        <div class="actions" id="polygonActions">
           <button id="undoPolygon" type="button">撤销上一点</button>
-          <button id="savePolygon" type="button">保存区域</button>
+          <button id="savePolygon" type="button" class="primary">保存区域</button>
           <button id="cancelPolygon" type="button">取消</button>
-        </span>
-        <p id="areaHelp" role="status">可拖动选择矩形，也可绘制多边形。区域按通道保存。</p>
+        </div>
+        <p id="areaHelp"></p>
+        <p class="error" id="areaError" role="alert"></p>
       </div>
     </section>
-    <section class="panel controls">
-      <h2>摄像头连接</h2>
+    <aside class="panel controls control-panel" aria-label="监控操作">
+      <h2>监控操作</h2>
       <form id="login" class="controls">
-        <label>云平台账号<input id="username" autocomplete="username" maxlength="200"></label>
-        <label>密码<input id="password" type="password" autocomplete="current-password" maxlength="300"></label>
-        <label class="check"><input id="remember" type="checkbox" checked>在本机记住账号和密码</label>
-        <label class="check"><input id="record" type="checkbox" checked>同时保存连续录像</label>
-        <small id="recordStatus"></small>
-        <small id="saved"></small>
         <label>通道<select id="channel"><option value="1">第 1 路</option><option value="2">第 2 路</option><option value="3">第 3 路</option></select></label>
-        <div class="actions"><button class="primary" id="start">打开预览</button><button type="button" id="stop">停止连接</button></div>
+        <div class="action-grid"><button class="primary" id="start">打开预览</button><button type="button" id="stop">停止连接</button></div>
+        <small class="empty-hide" id="recordStatus"></small>
       </form>
-      <div class="actions"><button id="detect">启动检测</button><button id="forget">清除已记住的账号</button></div>
-      <span>人体检测模型</span>
-      <div class="actions" role="group" aria-label="人体检测模型">
-        <button type="button" id="modelNano" aria-pressed="false" disabled>Nano · 省 CPU</button>
-        <button type="button" id="modelOriginal" aria-pressed="false" disabled>原模型 · 夜间优先</button>
-      </div>
-      <small id="modelStatus" role="status"></small>
+      <section aria-labelledby="detectHeading">
+        <h3 id="detectHeading">人体检测</h3>
+        <button id="detect" type="button">启动检测</button>
+        <div class="action-grid" role="group" aria-label="人体检测模型">
+          <button type="button" id="modelNano" aria-pressed="false" disabled>Nano · 省 CPU</button>
+          <button type="button" id="modelOriginal" aria-pressed="false" disabled>原模型</button>
+        </div>
+        <small id="modelStatus" role="status"></small>
+      </section>
       <p class="error" id="error" role="alert"></p>
-    </section>
+    </aside>
   </div>
-  <details class="panel snapshots alerts" id="mobileAlerts">
-    <summary>手机提醒</summary>
+  <section class="panel snapshots">
+    <div class="toolbar events-heading">
+      <h2>最近区域事件</h2>
+      <div class="header-actions">
+        <small id="eventStatus"></small>
+        <button id="openEventHistory" type="button">查看全部事件</button>
+      </div>
+    </div>
+    <ul class="event-cards" id="eventList"><li><small>正在读取事件…</small></li></ul>
+  </section>
+</main>
+<dialog id="settingsViewer" class="settings-dialog" aria-labelledby="settingsTitle">
+  <div class="toolbar"><h2 id="settingsTitle">设置</h2><button id="closeSettings" type="button">关闭</button></div>
+  <section>
+    <h3>摄像头连接</h3>
+    <div class="controls settings-fields">
+      <label>云平台账号<input id="username" form="login" autocomplete="username" maxlength="200"></label>
+      <label>密码<input id="password" form="login" type="password" autocomplete="current-password" maxlength="300"></label>
+      <label class="check"><input id="remember" form="login" type="checkbox" checked>在本机记住账号和密码</label>
+      <label class="check"><input id="record" form="login" type="checkbox" checked>同时保存连续录像</label>
+      <small id="saved"></small>
+      <div class="actions"><button id="applyConnection" type="button">打开预览</button><button id="forget" type="button">清除已记住的账号</button></div>
+      <p class="error" id="connectionError" role="alert"></p>
+    </div>
+  </section>
+  <section id="mobileAlerts">
+    <h3>手机提醒</h3>
     <ul class="event-list device-list" id="alertDevices" aria-label="已绑定设备"><li><small>正在读取已绑定设备…</small></li></ul>
     <form class="controls" id="alertForm">
       <small>打开手机 WxPusher 的「我的 → SPT」，把 SPT 粘贴在这里。<a href="https://wxpusher.zjiecode.com/download/" target="_blank" rel="noreferrer">下载 WxPusher</a></small>
@@ -75,9 +222,9 @@ canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-actio
       <small id="alertStatus" role="status"></small>
       <small id="alertFeedback" role="status"></small>
     </form>
-  </details>
-  <details class="panel snapshots alerts" id="storageSettings">
-    <summary>录像存储设置</summary>
+  </section>
+  <section id="storageSettings">
+    <h3>录像存储</h3>
     <form class="storage-form" id="storageForm">
       <div class="storage-limits">
         <label>事件视频及截图上限（GB）<input id="eventLimit" type="number" min="0.01" max="10000" step="0.01" required><small id="eventUsage"></small></label>
@@ -87,19 +234,9 @@ canvas{display:block;width:100%;aspect-ratio:16/9;background:#091013;touch-actio
       <button id="saveStorage" type="submit" disabled>保存上限</button>
       <small id="storageFeedback" role="status"></small>
     </form>
-  </details>
-  <section class="panel snapshots">
-    <div class="toolbar" style="padding:0;flex-wrap:wrap">
-      <h2>最近区域事件</h2>
-      <div class="header-actions">
-        <small id="eventStatus"></small>
-        <button id="openEventHistory" type="button">查看全部事件</button>
-      </div>
-    </div>
-    <ul class="event-cards" id="eventList"><li><small>正在读取事件…</small></li></ul>
   </section>
-</main>
-<dialog id="viewer"><button id="closeShot">关闭</button><img id="largeShot" alt="区域事件截图"></dialog>
+</dialog>
+<dialog id="viewer" aria-label="区域事件截图"><button id="closeShot" type="button">关闭</button><div id="shotContent"></div></dialog>
 <dialog id="historyViewer" class="history-dialog" aria-labelledby="historyTitle">
   <div class="toolbar"><h2 id="historyTitle">历史录像</h2><button id="closeHistory" type="button">关闭</button></div>
   <div class="history-filters">
@@ -131,6 +268,7 @@ let previousDevices;
 let alertBusy = false;
 let historyEntries = [];
 let storageLoaded = false, storageBusy = false;
+let starting = false;
 async function request(path, data) {
   const headers = {'X-Seetong-Session':session};
   const options = {headers, cache:'no-store', signal:AbortSignal.timeout(data === undefined ? 8000 : 30000)};
@@ -157,19 +295,31 @@ async function reloadExpiredSession() {
   }
 }
 let polygonDraft = null;
+let exclusionDraft = false;
 let polygonChannel = null;
 let savingPolygon = false;
+let areaMode = null;
 function showAreaControls() {
-  const drawing = polygonDraft !== null;
-  byId('startPolygon').hidden = drawing;
-  byId('startPolygon').disabled = !bitmap;
-  byId('polygonActions').hidden = !drawing;
+  const editing = areaMode !== null;
+  byId('editRegion').disabled = !bitmap || savingPolygon;
+  byId('editRegion').setAttribute('aria-expanded', String(editing));
+  byId('editRegion').textContent = editing ? '退出编辑' : '编辑区域';
+  byId('areaTools').hidden = !editing;
+  screen.dataset.editing = String(editing);
+  for (const [mode,id] of [['rectangle','startRectangle'], ['polygon','startPolygon'], ['exclusion','startExclusion']]) {
+    byId(id).setAttribute('aria-pressed', String(areaMode === mode));
+    byId(id).disabled = savingPolygon;
+  }
+  byId('clearExclusion').hidden = !state.exclusion_regions?.[state.channel];
+  byId('clearExclusion').disabled = savingPolygon;
+  byId('undoPolygon').hidden = areaMode === 'rectangle';
   byId('undoPolygon').disabled = savingPolygon || !polygonDraft?.length;
-  byId('savePolygon').disabled = savingPolygon || (polygonDraft?.length ?? 0) < 3;
+  byId('savePolygon').disabled = savingPolygon || !bitmap || (areaMode === 'rectangle'
+    ? !previewRegion || previewRegion[2] - previewRegion[0] < .02 || previewRegion[3] - previewRegion[1] < .02
+    : (polygonDraft?.length ?? 0) < 3);
   byId('cancelPolygon').disabled = savingPolygon;
-  byId('areaHelp').textContent = drawing
-    ? `沿边界依次点击拐角，至少 3 个点，再点「保存区域」。已选 ${polygonDraft.length} 点。`
-    : '可拖动选择矩形，也可绘制多边形。区域按通道保存。';
+  byId('areaHelp').textContent = areaMode === 'rectangle' ? '拖动画面框选检测区域，再点「保存区域」。'
+    : `${exclusionDraft ? '只圈住固定物体。进入忽略区的人员也不会计数。' : '沿检测边界依次点击拐角。'}至少 3 个点，已选 ${polygonDraft?.length ?? 0} 点。`;
 }
 function draw() {
   ctx.fillStyle = '#091013'; ctx.fillRect(0, 0, 640, 360);
@@ -178,14 +328,21 @@ function draw() {
     ctx.fillStyle = '#a9bcb7'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('等待摄像头画面', 320, 184);
   }
-  const region = polygonDraft ?? previewRegion ?? state.regions?.[state.channel];
-  if (region && bitmap) {
+  if (bitmap) {
+    const region = (!exclusionDraft ? polygonDraft : null) ?? previewRegion ?? state.regions?.[state.channel];
+    const excluded = (exclusionDraft ? polygonDraft : null) ?? state.exclusion_regions?.[state.channel];
+    drawRegion(region, '#69e5ab', polygonDraft && !exclusionDraft);
+    drawRegion(excluded, '#ffae66', polygonDraft && exclusionDraft);
+  }
+}
+function drawRegion(region, color, showPoints) {
+  if (region) {
     let points = region;
     if (typeof region[0] === 'number') {
       const [x,y,r,b] = region;
       points = [[x,y],[r,y],[r,b],[x,b]];
     }
-    ctx.fillStyle = '#69e5ab24'; ctx.strokeStyle = '#69e5ab'; ctx.lineWidth = 2;
+    ctx.fillStyle = color + '24'; ctx.strokeStyle = color; ctx.lineWidth = 2;
     if (points.length > 1) {
       ctx.beginPath();
       ctx.moveTo(points[0][0]*640, points[0][1]*360);
@@ -193,8 +350,8 @@ function draw() {
       if (points.length >= 3) { ctx.closePath(); ctx.fill(); }
       ctx.stroke();
     }
-    if (polygonDraft) {
-      ctx.fillStyle = '#69e5ab';
+    if (showPoints) {
+      ctx.fillStyle = color;
       for (const [x,y] of points) {
         ctx.beginPath(); ctx.arc(x*640,y*360,4,0,Math.PI*2); ctx.fill();
       }
@@ -207,63 +364,90 @@ function position(event) {
   return [bound((event.clientX-rect.left)/rect.width),bound((event.clientY-rect.top)/rect.height)];
 }
 screen.onpointerdown = event => {
-  if (!bitmap || polygonDraft !== null) return;
-  drag = position(event); screen.setPointerCapture(event.pointerId);
+  if (!bitmap || areaMode !== 'rectangle' || savingPolygon || drag || event.button !== 0) return;
+  drag = {point:position(event), pointer:event.pointerId};
+  previewRegion = null;
+  screen.setPointerCapture(event.pointerId);
 };
 screen.onpointermove = event => {
-  if (!drag) return;
+  if (drag?.pointer !== event.pointerId) return;
   const [x,y] = position(event);
-  previewRegion = [Math.min(x,drag[0]),Math.min(y,drag[1]),Math.max(x,drag[0]),Math.max(y,drag[1])];
+  const [left,top] = drag.point;
+  previewRegion = [Math.min(x,left),Math.min(y,top),Math.max(x,left),Math.max(y,top)];
   draw();
 };
-screen.onpointercancel = () => {drag = previewRegion = null; draw();};
-screen.onpointerup = async () => {
-  if (!drag) return;
-  drag = null;
-  if (previewRegion) {
-    const region = previewRegion;
-    await action(async () => {
-      await request('/api/region',{region});
-      state.regions[state.channel] = region;
-    });
-  }
-  previewRegion = null; draw();
-};
-byId('startPolygon').onclick = () => {
-  if (!bitmap) return;
-  polygonDraft = [];
-  polygonChannel = state.channel;
+screen.onpointercancel = event => {
+  if (drag?.pointer !== event.pointerId) return;
   drag = previewRegion = null;
   showAreaControls(); draw();
 };
+screen.onpointerup = event => {
+  if (drag?.pointer !== event.pointerId) return;
+  screen.onpointermove(event);
+  drag = null;
+  showAreaControls();
+};
+function setAreaMode(mode) {
+  if (mode && !bitmap) return;
+  areaMode = mode;
+  exclusionDraft = mode === 'exclusion';
+  polygonDraft = mode && mode !== 'rectangle' ? [] : null;
+  polygonChannel = mode ? state.channel : null;
+  drag = previewRegion = null;
+  byId('areaError').textContent = '';
+  showAreaControls(); draw();
+}
+byId('editRegion').onclick = () => setAreaMode(areaMode ? null : 'rectangle');
+byId('startRectangle').onclick = () => setAreaMode('rectangle');
+byId('startPolygon').onclick = () => setAreaMode('polygon');
+byId('startExclusion').onclick = () => setAreaMode('exclusion');
+byId('clearExclusion').onclick = () => action(async () => {
+  const channel = state.channel;
+  if (!confirm('移除后，该区域会恢复人员检测。确定移除忽略区？')) return;
+  await request('/api/exclusion-region', {channel, region: null});
+  if (state.exclusion_regions) delete state.exclusion_regions[channel];
+  showAreaControls(); draw();
+}, 'areaError');
 screen.onclick = event => {
   if (!bitmap || polygonDraft === null || savingPolygon || polygonDraft.length >= 32) return;
   polygonDraft.push(position(event));
   showAreaControls(); draw();
 };
 byId('undoPolygon').onclick = () => { polygonDraft?.pop(); showAreaControls(); draw(); };
-byId('cancelPolygon').onclick = () => { polygonDraft = null; showAreaControls(); draw(); };
+byId('cancelPolygon').onclick = () => { setAreaMode(null); byId('editRegion').focus(); };
 byId('savePolygon').onclick = () => action(async () => {
-  if (savingPolygon || !polygonDraft || polygonDraft.length < 3) return;
+  if (byId('savePolygon').disabled) return;
+  const region = areaMode === 'rectangle' ? previewRegion : polygonDraft;
   savingPolygon = true;
   showAreaControls();
   try {
-    await request('/api/region', {region: polygonDraft, channel: polygonChannel});
-    state.regions[polygonChannel] = polygonDraft;
-    polygonDraft = null;
+    const route = exclusionDraft ? '/api/exclusion-region' : '/api/region';
+    await request(route, {region, channel: polygonChannel});
+    const regions = exclusionDraft ? (state.exclusion_regions ??= {}) : state.regions;
+    regions[polygonChannel] = region;
+    setAreaMode(null);
   } finally {
     savingPolygon = false;
     showAreaControls(); draw();
   }
-});
-async function action(fn) {
-  byId('error').textContent = '';
-  try { await fn(); } catch(error) { byId('error').textContent = error.message; }
+}, 'areaError');
+async function action(fn, errorId = 'error') {
+  byId(errorId).textContent = '';
+  try { await fn(); } catch(error) { byId(errorId).textContent = error.message; }
 }
 byId('login').onsubmit = event => {
   event.preventDefault();
+  if (starting || state.active) return;
+  const settings = byId('settingsViewer');
+  if (!state.saved && (!byId('username').value.trim() || !byId('password').value)) {
+    if (!settings.open) settings.showModal();
+    byId('connectionError').textContent = '请输入云平台账号和密码。';
+    (byId('username').value.trim() ? byId('password') : byId('username')).focus();
+    return;
+  }
   action(async () => {
-    byId('start').disabled = true;
+    starting = true;
+    byId('start').disabled = byId('applyConnection').disabled = true;
     try {
       await request('/api/start',{
         username:byId('username').value,password:byId('password').value,
@@ -272,11 +456,18 @@ byId('login').onsubmit = event => {
       });
       byId('username').value = '';
       byId('password').value = '';
-    } finally { byId('start').disabled = !!state.active; }
-  });
+      if (settings.open) settings.close();
+    } finally {
+      starting = false;
+      byId('start').disabled = byId('applyConnection').disabled = !!state.active;
+    }
+  }, settings.open ? 'connectionError' : 'error');
 };
+byId('openSettings').onclick = () => byId('settingsViewer').showModal();
+byId('closeSettings').onclick = () => byId('settingsViewer').close();
+byId('applyConnection').onclick = () => byId('login').requestSubmit();
 byId('stop').onclick = () => action(() => request('/api/stop',{}));
-byId('forget').onclick = () => action(() => request('/api/forget',{}));
+byId('forget').onclick = () => action(() => request('/api/forget',{}), 'connectionError');
 byId('detect').onclick = () => action(() => request('/api/detect',{enabled:!state.detect}));
 const modelButtons = {nano: byId('modelNano'), original: byId('modelOriginal')};
 let savingModel = false;
@@ -383,7 +574,7 @@ byId('storageForm').onsubmit = async event => {
 };
 byId('closeShot').onclick = () => byId('viewer').close();
 byId('viewer').onclose = () => {
-  byId('largeShot').removeAttribute('src');
+  byId('shotContent').replaceChildren();
 };
 const eventPlayer = byId('eventPlayer');
 byId('closeEvent').onclick = () => byId('eventViewer').close();
@@ -400,6 +591,16 @@ function showListMessage(list, message) {
   label.textContent = message;
   row.append(label); list.replaceChildren(row);
 }
+function showClipDuration(seconds) {
+  const total = Math.floor(seconds);
+  const minutes = Math.floor(total / 60);
+  const time = [Math.floor(minutes / 60), minutes % 60, total % 60]
+    .slice(minutes >= 60 ? 0 : 1).map(value => String(value).padStart(2, '0')).join(':');
+  byId('clipDuration').textContent = `总时长 ${time}`;
+}
+eventPlayer.onloadedmetadata = () => {
+  if (Number.isFinite(eventPlayer.duration)) showClipDuration(eventPlayer.duration);
+};
 async function playRecording(recording, endpoint) {
   const generation = ++playbackRequest;
   const duration = byId('clipDuration');
@@ -416,15 +617,12 @@ async function playRecording(recording, endpoint) {
     ({seconds} = await (await request(`/api/${endpoint}/duration/${name}`)).json());
   } catch {}
   if (generation !== playbackRequest) return;
+  if (Number.isFinite(eventPlayer.duration)) return;
   if (!Number.isFinite(seconds)) {
     duration.textContent = '暂时无法读取总时长';
     return;
   }
-  const total = Math.ceil(seconds);
-  const minutes = Math.floor(total / 60);
-  const time = [Math.floor(minutes / 60), minutes % 60, total % 60]
-    .slice(minutes >= 60 ? 0 : 1).map(value => String(value).padStart(2, '0')).join(':');
-  duration.textContent = `总时长 ${time}`;
+  showClipDuration(seconds);
 }
 function recordingRow(recording, endpoint) {
   const {name, type, channel, time, size} = recording;
@@ -445,7 +643,10 @@ function recordingRow(recording, endpoint) {
 }
 function shotURL(shot) { return `/api/shot/${shot.name}?session=${session}`; }
 function openShot(shot) {
-  byId('largeShot').src = shotURL(shot);
+  const image = document.createElement('img');
+  image.alt = '区域事件截图';
+  image.src = shotURL(shot);
+  byId('shotContent').replaceChildren(image);
   byId('viewer').showModal();
 }
 function eventCard(entry) {
@@ -467,6 +668,8 @@ function eventCard(entry) {
   time.textContent = new Date(entry.time).toLocaleString('zh-CN', {hour12:false});
   body.append(name, time);
   if (shots.length) {
+    const details = document.createElement('details'), summary = document.createElement('summary');
+    summary.textContent = `${shots.length} 张事件截图`;
     const timeline = document.createElement('ul'); timeline.className = 'event-timeline';
     for (const shot of shots) {
       const item = document.createElement('li'), button = document.createElement('button');
@@ -477,7 +680,8 @@ function eventCard(entry) {
       button.onclick = () => openShot(shot);
       item.append(button); timeline.append(item);
     }
-    body.append(timeline);
+    details.append(summary, timeline);
+    body.append(details);
   }
   if (entry.name) {
     const actions = document.createElement('div'); actions.className = 'actions';
@@ -545,17 +749,20 @@ async function updateEvents() {
 async function poll() {
   try {
     state = await (await request('/api/state')).json();
-    if (!savingPolygon && polygonDraft !== null && (state.channel !== polygonChannel || !state.active)) {
-      polygonDraft = null;
-    }
+    if (!savingPolygon && areaMode && (state.channel !== polygonChannel || !state.active)) setAreaMode(null);
     showAlertState();
     showStorage();
     showDetectorModel();
     byId('status').textContent = state.message;
+    byId('connectionLight').dataset.live = String(!!state.active && !!state.sequence);
     byId('videoTitle').textContent = state.active ? `第 ${state.channel} 路实时画面` : '实时画面';
-    byId('count').textContent = '区域人数 ' + (state.count ?? '—');
+    byId('count').textContent = state.count == null ? '—' : `${state.count} 人`;
+    byId('recordIndicator').textContent = state.event_recording ? '事件录制中' : state.recording ? '连续录像中' : '待机';
+    const devices = state.alerts?.devices?.length;
+    byId('deviceIndicator').textContent = devices == null ? '—' : devices ? `已绑定 ${devices} 台` : '未绑定';
     byId('saved').textContent = state.saved ? '已记住。账号和密码留空即可使用。' : '尚未保存账号';
-    byId('start').disabled = state.active;
+    byId('start').disabled = starting || state.active;
+    byId('applyConnection').disabled = starting || state.active;
     byId('channel').disabled = state.active;
     byId('record').disabled = state.active;
     const ordinary = state.storage?.continuous;
@@ -577,7 +784,10 @@ async function poll() {
     draw();
   } catch(error) {
     byId('status').textContent = '本机服务暂不可用';
+    byId('connectionLight').dataset.live = 'false';
     if (bitmap) {bitmap.close(); bitmap = null; lastSequence = 0; draw();}
+    if (!savingPolygon && areaMode) setAreaMode(null);
+    showAreaControls();
     if (error.status === 403) await reloadExpiredSession();
   } finally { setTimeout(poll, 220); }
 }

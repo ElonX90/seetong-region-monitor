@@ -29,9 +29,9 @@ from urllib.parse import urlsplit
 import numpy as np
 from PIL import Image, ImageDraw
 from seetong_alerts import MobileAlerts, PushError, TOKEN, load_recipients
-from seetong_event_share import EventShare, EventShareHandler
+from seetong_event_share import EventShare, EventShareHandler, PlaybackCache, serve_recorded_video
 from seetong_recording import (DEFAULT_LIMITS, EVENT_NAME, NAME, SHOT_NAME,
-                               Recording, RecordingStorage, playback_command, recording_duration)
+                               Recording, RecordingStorage, recording_duration)
 from seetong_wine import WineCapture, native_capture
 
 ROOT = Path(__file__).resolve().parent
@@ -226,6 +226,12 @@ def in_region(vertices, x, y):
     return inside
 
 
+def box_inside_regions(box, inclusion, exclusion):
+    x = (box[0] + box[2]) / (2 * WIDTH)
+    y = box[3] / HEIGHT
+    return in_region(inclusion, x, y) and (not exclusion or not in_region(exclusion, x, y))
+
+
 class StableCount:
     RISE_SECONDS = 1.0
     FALL_SECONDS = 2.0
@@ -255,6 +261,7 @@ class StableCount:
 class Monitor:
     def __init__(self, wine_capture=None, event_share=None):
         self.lock = threading.RLock()
+        self.playback = PlaybackCache(timeout=300)
         self.stop = threading.Event()
         self.worker = None
         self.capture = wine_capture if wine_capture is not None else native_capture()
@@ -276,6 +283,9 @@ class Monitor:
         self.model_key = preferred if preferred in MODELS and MODELS[preferred].is_file() else (
             "nano" if MODELS["nano"].is_file() else "original")
         self.regions = json.loads(SETTINGS.read_text(encoding="utf-8")) if SETTINGS.exists() else {}
+        self.exclusion_settings = DATA / "excluded-regions.json"
+        self.exclusion_regions = (json.loads(self.exclusion_settings.read_text(encoding="utf-8"))
+                                  if self.exclusion_settings.exists() else {})
         limits = json.loads(STORAGE_SETTINGS.read_text(encoding="utf-8")) if STORAGE_SETTINGS.exists() else DEFAULT_LIMITS
         self.storage = RecordingStorage(RECORDINGS, SHOTS, limits)
         self.event_share = event_share
@@ -404,9 +414,10 @@ class Monitor:
                 with self.lock:
                     detect, current_revision = self.detect, self.revision
                     region = self.regions.get(str(self.channel))
+                    excluded = self.exclusion_regions.get(str(self.channel))
                     model_key = self.model_key
                 if current_revision != revision:
-                    config = (detect, region)
+                    config = (detect, region, excluded)
                     if config != detection_config:
                         stable = StableCount()
                         detection_config = config
@@ -425,8 +436,9 @@ class Monitor:
                         loaded_model = model_key
                     image = Image.frombytes("RGB", (WIDTH, HEIGHT), raw)
                     vertices = region_vertices(region)
+                    excluded_vertices = region_vertices(excluded) if excluded else ()
                     visible = [box for box in detector.boxes(image)
-                               if in_region(vertices, (box[0] + box[2]) / (2 * WIDTH), box[3] / HEIGHT)]
+                               if box_inside_regions(box, vertices, excluded_vertices)]
                     change = stable.observe(len(visible), captured, continuous=detection_epoch == stream_epoch)
                     detection_epoch = stream_epoch
                     if change:
@@ -587,6 +599,7 @@ class Handler(BaseHTTPRequestHandler):
                     alerts=monitor.alerts.status(),
                     event_share=monitor.event_share is not None,
                     regions=monitor.regions,
+                    exclusion_regions=monitor.exclusion_regions,
                     detector_model=monitor.model_key,
                     active_detector_model=monitor.active_model_key,
                     detector_models={key: path.is_file() for key, path in MODELS.items()},
@@ -677,28 +690,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply({}, 404)
             return
 
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            return self.reply({}, 503)
-        # The stored stream can be HEVC. Convert only while playing in the browser.
-        with subprocess.Popen(playback_command(ffmpeg, path), stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                creationflags=CREATE_NO_WINDOW) as player:
-            try:
-                initial = player.stdout.read1(64 * 1024)
-                if not initial:
-                    return self.reply({}, 422)
-                self.send_response(200)
-                self.send_header("Content-Type", "video/mp4")
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(initial)
-                shutil.copyfileobj(player.stdout, self.wfile)
-            except ConnectionError:
-                pass
-            finally:
-                if player.poll() is None:
-                    player.kill()
+        try:
+            serve_recorded_video(self, path, self.server.monitor.playback)
+        except (ConnectionError, TimeoutError):
+            pass
+
+    def headers_for(self, status, mime, length):
+        self.send_response(status)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(length))
+        self.send_header("Cache-Control", "no-store")
 
     def do_POST(self):
         if (self.headers.get("Host") != self.server.host or
@@ -759,17 +760,30 @@ class Handler(BaseHTTPRequestHandler):
                 elif route == "/api/stop":
                     monitor.stop.set()
                     monitor.message = "正在停止"
-                elif route == "/api/region":
+                elif route in ("/api/region", "/api/exclusion-region"):
                     if not monitor.frame:
                         raise ValueError("请先打开实时画面")
                     points = data.get("region")
                     if data.get("channel", monitor.channel) != monitor.channel:
                         raise ValueError("通道已切换，请重新绘制区域")
-                    if not valid_region(points):
+                    exclusion = route == "/api/exclusion-region"
+                    if "region" not in data:
+                        raise ValueError("缺少区域参数")
+                    if not (exclusion and points is None) and not valid_region(points):
                         raise ValueError("区域太小或边线相交，请调整边界")
-                    updated = monitor.regions | {str(monitor.channel): points}
-                    atomic_write(SETTINGS, json.dumps(updated).encode("utf-8"))
-                    monitor.regions = updated
+                    channel = str(monitor.channel)
+                    if exclusion:
+                        updated = monitor.exclusion_regions.copy()
+                        if points is None:
+                            updated.pop(channel, None)
+                        else:
+                            updated[channel] = points
+                        atomic_write(monitor.exclusion_settings, json.dumps(updated).encode("utf-8"))
+                        monitor.exclusion_regions = updated
+                    else:
+                        updated = monitor.regions | {channel: points}
+                        atomic_write(SETTINGS, json.dumps(updated).encode("utf-8"))
+                        monitor.regions = updated
                     monitor.revision += 1
                 elif route == "/api/detector-model":
                     selected = data.get("model")

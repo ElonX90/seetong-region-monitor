@@ -50,14 +50,15 @@ def recording_duration(path):
         return None
 
 
-def playback_command(ffmpeg, path, *, copy_video=False):
+def playback_command(ffmpeg, path, *, copy_video=False, destination=None):
     encoding = (["-c:v", "copy"] if copy_video else
                 ["-c:v", "libx264", "-threads", "2", "-preset", "ultrafast",
                  "-pix_fmt", "yuv420p", "-g", "30"])
     return [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-threads", "2", "-i", str(path),
-        "-map", "0:v:0", "-an", *encoding, "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
-        "-f", "mp4", "pipe:1",
+        "-map", "0:v:0", "-an", *encoding, "-movflags",
+        "+faststart" if destination else "+frag_keyframe+empty_moov+default_base_moof",
+        "-f", "mp4", str(destination) if destination else "pipe:1",
     ]
 
 
